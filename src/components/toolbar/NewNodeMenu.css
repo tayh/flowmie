@@ -1,0 +1,45 @@
+.new-node-menu {
+  position: relative;
+  font-family: Menlo, Consolas, monospace;
+}
+
+.new-node-menu > button {
+  background-color: #2a2a2a;
+  color: #f0f0f0;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.new-node-menu > button:hover {
+  background-color: #3a3a3a;
+}
+
+.new-node-menu__list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin: 4px 0 0;
+  padding: 4px;
+  list-style: none;
+  background-color: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  min-width: 140px;
+}
+
+.new-node-menu__list button {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: #f0f0f0;
+  padding: 6px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.new-node-menu__list button:hover {
+  background-color: #3a3a3a;
+}

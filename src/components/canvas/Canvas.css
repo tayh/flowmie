@@ -1,0 +1,31 @@
+.canvas {
+  width: 100vw;
+  height: 100vh;
+  position: relative;
+}
+
+.canvas__toolbar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 10;
+  display: flex;
+  gap: 8px;
+}
+
+/* `color-scheme: dark` on :root makes WebKit render unstyled buttons with a
+   dark UA background, which swallows React Flow's dark SVG icons. Force the
+   controls panel to its own explicit light surface so the icons stay visible. */
+.react-flow__controls-button {
+  background-color: #2a2a2a;
+  border-bottom: 1px solid #3a3a3a;
+  color: #f0f0f0;
+}
+
+.react-flow__controls-button:hover {
+  background-color: #3a3a3a;
+}
+
+.react-flow__controls-button svg {
+  fill: #f0f0f0;
+}
