@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | ID | F001 |
-| Status | in-progress |
+| Status | done |
 | Milestone | MVP |
 
 ## 1. Overview
@@ -282,6 +282,12 @@ All remaining structs mirror the TypeScript types above one-to-one.
 
 **Acceptance criteria:**
 
-- [ ] A terminal created with the "Bug Whisperer" role automatically receives a corresponding initial instruction
-- [ ] A note connected to a terminal receives text updates as the agent works
-- [ ] Closing and reopening the app restores the complete workspace, respawns terminals, and reapplies roles
+- [x] A terminal created with the "Bug Whisperer" role automatically receives a corresponding initial instruction
+- [x] A note connected to a terminal receives text updates as the agent works
+- [x] Closing and reopening the app restores the complete workspace, respawns terminals, and reapplies roles
+
+**Implementation notes:**
+
+- Role injection is `agentType`-aware: Claude Code takes the role as its initial prompt launch argument (`claude --dangerously-skip-permissions "<role>"`), avoiding a stdin timing race; other agents get the role written over stdin ~800ms after spawn. Claude's one-time-per-folder "trust this folder" prompt is a separate security gate that is intentionally NOT bypassed — once accepted it persists and the role runs as the first message.
+- Notes are fed via the same relay path as terminal→terminal (Phase 4): a terminal→note edge appends the source's sanitized response to the note's content instead of writing to a PTY.
+- Full persistence is automatic: the workspace debounce-saves on change and the most recently saved workspace auto-loads on startup, respawning terminals (with role/cwd) and recreating webviews.

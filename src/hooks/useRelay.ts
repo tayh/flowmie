@@ -61,14 +61,23 @@ export function useRelay() {
       const message = trimResponse(raw, sourceNode.data.agentType);
       if (!message) return;
 
+      const updateNoteContent = useWorkspace.getState().updateNoteContent;
+
       for (const edge of outgoingEdges(sourceNodeId)) {
         const targetNodeId = edge.source === sourceNodeId ? edge.target : edge.source;
-        const targetNode = nodes.find(
-          (n): n is TerminalRFNode => n.id === targetNodeId && n.type === "terminal",
-        );
-        if (!targetNode?.data.ptyId) continue;
-        // Trailing carriage return submits the relayed message to the agent.
-        void invoke("pty_write", { ptyId: targetNode.data.ptyId, data: `${message}\r` });
+        const targetNode = nodes.find((n) => n.id === targetNodeId);
+        if (!targetNode) continue;
+
+        if (targetNode.type === "terminal") {
+          if (!targetNode.data.ptyId) continue;
+          // Trailing carriage return submits the relayed message to the agent.
+          void invoke("pty_write", { ptyId: targetNode.data.ptyId, data: `${message}\r` });
+        } else if (targetNode.type === "note") {
+          // Append the response to the note rather than feeding it as input.
+          const existing = targetNode.data.content;
+          const separator = existing.trim() === "" ? "" : "\n\n";
+          updateNoteContent(targetNode.id, `${existing}${separator}${message}`);
+        }
       }
     }
 

@@ -29,3 +29,17 @@
 .react-flow__controls-button svg {
   fill: #f0f0f0;
 }
+
+/* Bigger, clearly visible connection handles that sit above node content
+   (xterm canvas / note textarea) so they stay grabbable and droppable. */
+.react-flow__handle {
+  width: 12px;
+  height: 12px;
+  background: #4aa3ff;
+  border: 2px solid #14314f;
+  z-index: 20;
+}
+
+.react-flow__handle:hover {
+  background: #7cc0ff;
+}

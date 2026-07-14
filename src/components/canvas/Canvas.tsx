@@ -10,15 +10,21 @@ import "@xyflow/react/dist/style.css";
 import { useWorkspace } from "../../hooks/useWorkspace";
 import { useWebviewSync } from "../../hooks/useWebviewSync";
 import { useRelay } from "../../hooks/useRelay";
+import { usePersistence } from "../../hooks/usePersistence";
 import { TerminalNode } from "./TerminalNode";
 import { WebviewNode } from "./WebviewNode";
+import { NoteNode } from "./NoteNode";
 import { RelayEdge } from "./RelayEdge";
 import { NewNodeMenu } from "../toolbar/NewNodeMenu";
 import { WorkspaceMenu } from "../toolbar/WorkspaceMenu";
 import type { FlowmieRFNode, Viewport } from "../../types/workspace";
 import "./Canvas.css";
 
-const nodeTypes: NodeTypes = { terminal: TerminalNode, webview: WebviewNode };
+const nodeTypes: NodeTypes = {
+  terminal: TerminalNode,
+  webview: WebviewNode,
+  note: NoteNode,
+};
 const edgeTypes: EdgeTypes = { relay: RelayEdge };
 
 export function Canvas() {
@@ -32,8 +38,10 @@ export function Canvas() {
   const setViewport = useWorkspace((s) => s.setViewport);
   const addTerminal = useWorkspace((s) => s.addTerminal);
   const addWebview = useWorkspace((s) => s.addWebview);
+  const addNote = useWorkspace((s) => s.addNote);
   const { syncNode, syncAllWebviews } = useWebviewSync();
   useRelay();
+  usePersistence();
 
   const handleMoveEnd = useCallback(
     (_: unknown, vp: Viewport) => {
@@ -75,6 +83,8 @@ export function Canvas() {
         <NewNodeMenu
           onSelectAgent={(agentType) => void addTerminal(agentType)}
           onSelectWeb={(url, label) => void addWebview(url, label)}
+          onSelectRole={(instruction) => void addTerminal("claude", { role: instruction })}
+          onAddNote={() => addNote()}
         />
         <WorkspaceMenu />
       </div>

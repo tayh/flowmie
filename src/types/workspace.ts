@@ -39,7 +39,16 @@ export interface WebviewNodeData {
   label: string;
 }
 
-export type CanvasNode = TerminalNodeData | WebviewNodeData;
+export interface NoteNodeData {
+  id: string;
+  type: "note";
+  position: Position;
+  size: Size;
+  content: string;
+  connectedTerminalId: string | null;
+}
+
+export type CanvasNode = TerminalNodeData | WebviewNodeData | NoteNodeData;
 
 export type EdgeDirection = "source-to-target" | "bidirectional";
 
@@ -83,9 +92,15 @@ export interface WebviewNodePayload extends Record<string, unknown> {
   webviewLabel: string | null;
 }
 
+export interface NoteNodePayload extends Record<string, unknown> {
+  content: string;
+  connectedTerminalId: string | null;
+}
+
 export type TerminalRFNode = Node<TerminalNodePayload, "terminal">;
 export type WebviewRFNode = Node<WebviewNodePayload, "webview">;
-export type FlowmieRFNode = TerminalRFNode | WebviewRFNode;
+export type NoteRFNode = Node<NoteNodePayload, "note">;
+export type FlowmieRFNode = TerminalRFNode | WebviewRFNode | NoteRFNode;
 
 /** React Flow edge data payload. */
 export interface RelayEdgePayload extends Record<string, unknown> {

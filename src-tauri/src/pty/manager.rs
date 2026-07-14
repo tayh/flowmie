@@ -20,18 +20,34 @@ pub struct PtyManager {
     sessions: Mutex<HashMap<String, PtySession>>,
 }
 
-fn command_for_agent(agent_type: &str) -> CommandBuilder {
+/// Builds the process command for an agent. Returns whether the `role` was
+/// consumed as a launch argument (true) — in which case the caller must NOT
+/// also inject it over stdin.
+fn command_for_agent(agent_type: &str, role: Option<&str>) -> (CommandBuilder, bool) {
     match agent_type {
-        "claude" => CommandBuilder::new("claude"),
-        "codex" => CommandBuilder::new("codex"),
-        "opencode" => CommandBuilder::new("opencode"),
+        "claude" => {
+            let mut cmd = CommandBuilder::new("claude");
+            // Skip the first-run "trust this folder" / permission gate, which
+            // otherwise blocks the terminal before it can accept the role.
+            cmd.arg("--dangerously-skip-permissions");
+            // Claude Code takes an initial prompt as a positional arg, so the
+            // role can be seeded directly at launch — no stdin timing race.
+            if let Some(instruction) = role {
+                cmd.arg(instruction);
+                return (cmd, true);
+            }
+            (cmd, false)
+        }
+        "codex" => (CommandBuilder::new("codex"), false),
+        "opencode" => (CommandBuilder::new("opencode"), false),
         _ => {
-            if cfg!(windows) {
+            let cmd = if cfg!(windows) {
                 CommandBuilder::new("cmd.exe")
             } else {
                 let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
                 CommandBuilder::new(shell)
-            }
+            };
+            (cmd, false)
         }
     }
 }
@@ -54,7 +70,7 @@ impl PtyManager {
             })
             .map_err(|e| e.to_string())?;
 
-        let mut cmd = command_for_agent(agent_type);
+        let (mut cmd, role_passed_as_arg) = command_for_agent(agent_type, role.as_deref());
         if !cwd.is_empty() {
             cmd.cwd(cwd);
         }
@@ -145,9 +161,17 @@ impl PtyManager {
             });
         }
 
-        if let Some(instruction) = role {
-            // Injecting an initial instruction on spawn is Phase 5 scope; not wired up yet.
-            let _ = instruction;
+        if let (Some(instruction), false) = (role, role_passed_as_arg) {
+            // For agents that don't take an initial prompt as a launch arg,
+            // inject the role as the first message over stdin. A short delay
+            // gives the CLI time to finish booting before we submit it.
+            let app = app.clone();
+            let pty_id = pty_id.clone();
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(800));
+                let manager = app.state::<PtyManager>();
+                let _ = manager.write(&pty_id, &format!("{instruction}\r"));
+            });
         }
 
         Ok(pty_id)

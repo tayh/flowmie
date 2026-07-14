@@ -14,18 +14,45 @@ const WEB_PRESETS: { url: string; label: string }[] = [
   { url: "https://gemini.google.com", label: "Gemini" },
 ];
 
+// Preset roles spawn a Claude Code terminal seeded with an initial
+// instruction (injected on spawn via pty_write).
+const ROLE_PRESETS: { label: string; instruction: string }[] = [
+  {
+    label: "Bug Whisperer",
+    instruction:
+      "You are the Bug Whisperer: a debugging specialist. When given a problem, reproduce it, isolate the root cause, and propose the smallest correct fix. Explain your reasoning concisely.",
+  },
+  {
+    label: "Code Reviewer",
+    instruction:
+      "You are a meticulous code reviewer. Review changes for correctness, edge cases, and simplicity. Point out concrete issues with file/line references and suggest improvements.",
+  },
+  {
+    label: "Test Writer",
+    instruction:
+      "You are a testing specialist. Write focused, meaningful tests that cover the important behavior and edge cases of the code you are given.",
+  },
+];
+
 interface NewNodeMenuProps {
   onSelectAgent: (agentType: AgentType) => void;
   onSelectWeb: (url: string, label: string) => void;
+  onSelectRole: (instruction: string) => void;
+  onAddNote: () => void;
 }
 
-export function NewNodeMenu({ onSelectAgent, onSelectWeb }: NewNodeMenuProps) {
+export function NewNodeMenu({
+  onSelectAgent,
+  onSelectWeb,
+  onSelectRole,
+  onAddNote,
+}: NewNodeMenuProps) {
   const [open, setOpen] = useState(false);
-  const [webOpen, setWebOpen] = useState(false);
+  const [flyout, setFlyout] = useState<"web" | "roles" | null>(null);
 
   function close() {
     setOpen(false);
-    setWebOpen(false);
+    setFlyout(null);
   }
 
   function handleCustomUrl() {
@@ -44,7 +71,7 @@ export function NewNodeMenu({ onSelectAgent, onSelectWeb }: NewNodeMenuProps) {
   return (
     <div className="new-node-menu">
       <button type="button" onClick={() => setOpen((o) => !o)}>
-        + New terminal
+        + New
       </button>
       {open && (
         <ul className="new-node-menu__list">
@@ -61,14 +88,41 @@ export function NewNodeMenu({ onSelectAgent, onSelectWeb }: NewNodeMenuProps) {
               </button>
             </li>
           ))}
+
           <li className="new-node-menu__separator" />
+
           <li
             className="new-node-menu__submenu"
-            onMouseEnter={() => setWebOpen(true)}
-            onMouseLeave={() => setWebOpen(false)}
+            onMouseEnter={() => setFlyout("roles")}
+            onMouseLeave={() => setFlyout(null)}
+          >
+            <button type="button">Roles ▸</button>
+            {flyout === "roles" && (
+              <ul className="new-node-menu__list new-node-menu__list--flyout">
+                {ROLE_PRESETS.map((role) => (
+                  <li key={role.label}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onSelectRole(role.instruction);
+                        close();
+                      }}
+                    >
+                      {role.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+
+          <li
+            className="new-node-menu__submenu"
+            onMouseEnter={() => setFlyout("web")}
+            onMouseLeave={() => setFlyout(null)}
           >
             <button type="button">Web ▸</button>
-            {webOpen && (
+            {flyout === "web" && (
               <ul className="new-node-menu__list new-node-menu__list--flyout">
                 {WEB_PRESETS.map((preset) => (
                   <li key={preset.url}>
@@ -90,6 +144,20 @@ export function NewNodeMenu({ onSelectAgent, onSelectWeb }: NewNodeMenuProps) {
                 </li>
               </ul>
             )}
+          </li>
+
+          <li className="new-node-menu__separator" />
+
+          <li>
+            <button
+              type="button"
+              onClick={() => {
+                onAddNote();
+                close();
+              }}
+            >
+              Note
+            </button>
           </li>
         </ul>
       )}
