@@ -21,3 +21,9 @@ pub struct PtyErrorEvent {
     pub pty_id: String,
     pub message: String,
 }
+
+#[derive(Clone, Serialize)]
+pub struct WebviewLoadedEvent {
+    #[serde(rename = "webviewLabel")]
+    pub webview_label: String,
+}

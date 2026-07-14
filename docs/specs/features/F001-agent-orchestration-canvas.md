@@ -235,13 +235,14 @@ All remaining structs mirror the TypeScript types above one-to-one.
 
 - Coordinate synchronization between React Flow's logical space, which has its own zoom/pan system, and Tauri's absolute screen coordinates requires an independently tested conversion function
 - Performance: repositioning the webview on every zoom frame may cause jank; consider debouncing or repositioning only when the gesture ends
+- **Linux-specific (discovered during implementation):** Tauri v2's public `add_child` API packs Linux child webviews into the window's plain `gtk::Box` (no absolute positioning support) — position/size are silently ignored and the webview fills the window. Positioned overlays require bypassing Tauri and using `wry`+`gtk` directly: a `gtk::Overlay`/`gtk::Fixed` built by hand over the window's existing content (`src-tauri/src/webview/manager_linux.rs`), with `gtk_overlay_set_overlay_pass_through` enabled (otherwise the transparent overlay swallows all clicks to the rest of the UI) and `Fixed::move_` (not wry's own `set_bounds`, which only applies a one-off `size_allocate` that GtkFixed overrides on its next layout pass) for repositioning. Windows/macOS still use Tauri's `add_child` directly (`manager.rs`) since it reportedly works there.
 
 **Acceptance criteria:**
 
-- [ ] Creating a "ChatGPT" node loads the real, interactive page, including login and text input
-- [ ] Moving the canvas node moves the webview correctly without perceptible delay
-- [ ] Zooming the canvas resizes and repositions the webview without clipping or misalignment
-- [ ] Closing the node destroys the webview (`webview_destroy`) without leaking a process
+- [x] Creating a "ChatGPT" node loads the real, interactive page, including login and text input
+- [x] Moving the canvas node moves the webview correctly without perceptible delay
+- [x] Zooming the canvas resizes and repositions the webview without clipping or misalignment
+- [x] Closing the node destroys the webview (`webview_destroy`) without leaking a process
 
 ---
 

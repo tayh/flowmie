@@ -1013,6 +1013,7 @@ name = "flowmie"
 version = "0.1.0"
 dependencies = [
  "dirs 5.0.1",
+ "gtk",
  "portable-pty",
  "serde",
  "serde_json",
@@ -1020,6 +1021,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-opener",
  "uuid",
+ "wry",
 ]
 
 [[package]]

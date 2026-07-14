@@ -1,0 +1,66 @@
+.webview-node {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background-color: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.webview-node__titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  /* Fixed height (not padding-driven) so it matches WEBVIEW_TITLEBAR_HEIGHT
+     in src/lib/webviewBounds.ts exactly — the native overlay is inset by
+     that same constant so it doesn't cover this bar. */
+  height: 28px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  background-color: #2a2a2a;
+  color: #cfcfcf;
+  font-size: 12px;
+  cursor: grab;
+  user-select: none;
+}
+
+.webview-node__actions {
+  display: flex;
+  gap: 2px;
+}
+
+.webview-node__actions button {
+  background: none;
+  border: none;
+  color: #cfcfcf;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.webview-node__actions button:hover {
+  color: #fff;
+  background-color: #3a3a3a;
+}
+
+.webview-node__body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.webview-node__placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #888;
+  font-size: 12px;
+  text-align: center;
+  padding: 12px;
+}

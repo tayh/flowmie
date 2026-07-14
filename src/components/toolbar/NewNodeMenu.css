@@ -43,3 +43,22 @@
 .new-node-menu__list button:hover {
   background-color: #3a3a3a;
 }
+
+.new-node-menu__separator {
+  height: 1px;
+  margin: 4px 4px;
+  background-color: #3a3a3a;
+  list-style: none;
+}
+
+.new-node-menu__submenu {
+  position: relative;
+}
+
+.new-node-menu__list--flyout {
+  top: -4px;
+  /* Touch the trigger directly (no gap) so the mouse never leaves the
+     submenu's hover area while moving from "Web ▸" to the flyout items. */
+  left: 100%;
+  margin: 0;
+}

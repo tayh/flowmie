@@ -9,12 +9,37 @@ const AGENTS: { value: AgentType; label: string }[] = [
   { value: "shell", label: "Shell" },
 ];
 
+const WEB_PRESETS: { url: string; label: string }[] = [
+  { url: "https://chat.openai.com", label: "ChatGPT" },
+  { url: "https://gemini.google.com", label: "Gemini" },
+];
+
 interface NewNodeMenuProps {
-  onSelect: (agentType: AgentType) => void;
+  onSelectAgent: (agentType: AgentType) => void;
+  onSelectWeb: (url: string, label: string) => void;
 }
 
-export function NewNodeMenu({ onSelect }: NewNodeMenuProps) {
+export function NewNodeMenu({ onSelectAgent, onSelectWeb }: NewNodeMenuProps) {
   const [open, setOpen] = useState(false);
+  const [webOpen, setWebOpen] = useState(false);
+
+  function close() {
+    setOpen(false);
+    setWebOpen(false);
+  }
+
+  function handleCustomUrl() {
+    const url = window.prompt("URL");
+    if (!url) return;
+    let label = url;
+    try {
+      label = new URL(url).hostname;
+    } catch {
+      // keep raw url as the label if it doesn't parse
+    }
+    onSelectWeb(url, label);
+    close();
+  }
 
   return (
     <div className="new-node-menu">
@@ -28,14 +53,44 @@ export function NewNodeMenu({ onSelect }: NewNodeMenuProps) {
               <button
                 type="button"
                 onClick={() => {
-                  onSelect(agent.value);
-                  setOpen(false);
+                  onSelectAgent(agent.value);
+                  close();
                 }}
               >
                 {agent.label}
               </button>
             </li>
           ))}
+          <li className="new-node-menu__separator" />
+          <li
+            className="new-node-menu__submenu"
+            onMouseEnter={() => setWebOpen(true)}
+            onMouseLeave={() => setWebOpen(false)}
+          >
+            <button type="button">Web ▸</button>
+            {webOpen && (
+              <ul className="new-node-menu__list new-node-menu__list--flyout">
+                {WEB_PRESETS.map((preset) => (
+                  <li key={preset.url}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onSelectWeb(preset.url, preset.label);
+                        close();
+                      }}
+                    >
+                      {preset.label}
+                    </button>
+                  </li>
+                ))}
+                <li>
+                  <button type="button" onClick={handleCustomUrl}>
+                    Custom URL…
+                  </button>
+                </li>
+              </ul>
+            )}
+          </li>
         </ul>
       )}
     </div>

@@ -1,6 +1,7 @@
 mod commands;
 mod events;
 mod pty;
+mod webview;
 mod workspace;
 
 use pty::manager::PtyManager;
@@ -18,6 +19,9 @@ pub fn run() {
             commands::workspace_save,
             commands::workspace_load,
             commands::workspace_list,
+            commands::webview_create,
+            commands::webview_update_bounds,
+            commands::webview_destroy,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -17,7 +17,7 @@ interface Size {
   height: number;
 }
 
-/** Persisted node shape (mirrors src-tauri/src/workspace/mod.rs). */
+/** Persisted node shapes (mirror src-tauri/src/workspace/mod.rs). */
 export interface TerminalNodeData {
   id: string;
   type: "terminal";
@@ -30,7 +30,16 @@ export interface TerminalNodeData {
   ptyId: string | null;
 }
 
-export type CanvasNode = TerminalNodeData;
+export interface WebviewNodeData {
+  id: string;
+  type: "webview";
+  position: Position;
+  size: Size;
+  url: string;
+  label: string;
+}
+
+export type CanvasNode = TerminalNodeData | WebviewNodeData;
 
 export interface CanvasEdge {
   id: string;
@@ -55,7 +64,7 @@ export interface WorkspaceSummary {
   updatedAt: string;
 }
 
-/** React Flow node data payload (position/size live on the RF node itself). */
+/** React Flow node data payloads (position/size live on the RF node itself). */
 export interface TerminalNodePayload extends Record<string, unknown> {
   agentType: AgentType;
   role?: string;
@@ -63,4 +72,13 @@ export interface TerminalNodePayload extends Record<string, unknown> {
   ptyId: string | null;
 }
 
+export interface WebviewNodePayload extends Record<string, unknown> {
+  url: string;
+  label: string;
+  // Runtime-only; always null on disk. Set again after a manual respawn.
+  webviewLabel: string | null;
+}
+
 export type TerminalRFNode = Node<TerminalNodePayload, "terminal">;
+export type WebviewRFNode = Node<WebviewNodePayload, "webview">;
+export type FlowmieRFNode = TerminalRFNode | WebviewRFNode;

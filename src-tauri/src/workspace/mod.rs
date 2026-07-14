@@ -36,9 +36,19 @@ pub struct TerminalNodeData {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct WebviewNodeData {
+    pub id: String,
+    pub position: Position,
+    pub size: Size,
+    pub url: String,
+    pub label: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum CanvasNode {
     Terminal(TerminalNodeData),
+    Webview(WebviewNodeData),
 }
 
 #[derive(Serialize, Deserialize, Clone)]
