@@ -259,9 +259,16 @@ All remaining structs mirror the TypeScript types above one-to-one.
 
 **Acceptance criteria:**
 
-- [ ] When terminal A is connected to terminal B, a message entered manually in A appears as input in B after the agent finishes its response
-- [ ] Disconnecting the edge stops the relay immediately
-- [ ] No ANSI escape sequences leak into relayed text
+- [x] When terminal A is connected to terminal B, a message entered manually in A appears as input in B after the agent finishes its response
+- [x] Disconnecting the edge stops the relay immediately
+- [x] No ANSI escape sequences leak into relayed text
+
+**Implementation notes:**
+
+- The relay is orchestrated on the frontend (`src/hooks/useRelay.ts`), which already receives every terminal's `pty://data` stream — simpler than a backend relay and lets the sanitization heuristics be unit-tested (`src/lib/sanitize.ts` / `sanitize.test.ts`). The `connection_relay` command from the original IPC sketch is therefore unused.
+- "Agent finished its response" is detected by an idle timeout (source terminal quiet for ~800ms), then the buffered output is ANSI-stripped and trimmed and written to the target's input followed by a carriage return (submit).
+- Output trimming is `agentType`-aware: shell output has prompt lines (including theme arrows like `➜`/`❯`, which also carry the echoed command) stripped. Other agent types keep multi-line responses intact.
+- Relaying is intended for agent→agent chaining; shell→shell is a degenerate case (the receiver tries to execute the text as a command). A deliberately-created cycle (A→B and B→A) feeds back on itself — the per-edge enable/disable toggle is the escape hatch.
 
 ---
 

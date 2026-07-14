@@ -57,6 +57,12 @@ pub struct CanvasEdge {
     pub source: String,
     pub target: String,
     pub direction: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Serialize, Deserialize, Clone)]

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { NodeProps } from "@xyflow/react";
+import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -68,6 +68,7 @@ export function TerminalNode({ id, data }: NodeProps<TerminalRFNode>) {
 
   return (
     <div className="terminal-node">
+      <Handle type="target" position={Position.Left} />
       <div className="terminal-node__titlebar">
         <span className="terminal-node__label">{data.agentType}</span>
         <div className="terminal-node__actions">
@@ -82,6 +83,7 @@ export function TerminalNode({ id, data }: NodeProps<TerminalRFNode>) {
         </div>
       </div>
       <div className="terminal-node__body nodrag nopan nowheel" ref={containerRef} />
+      <Handle type="source" position={Position.Right} />
     </div>
   );
 }

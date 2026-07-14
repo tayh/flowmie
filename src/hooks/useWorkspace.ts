@@ -1,9 +1,20 @@
 import { create } from "zustand";
-import { applyNodeChanges, type NodeChange, type OnNodesChange } from "@xyflow/react";
+import {
+  addEdge,
+  applyEdgeChanges,
+  applyNodeChanges,
+  type Connection,
+  type EdgeChange,
+  type NodeChange,
+  type OnEdgesChange,
+  type OnNodesChange,
+} from "@xyflow/react";
 import { invoke } from "@tauri-apps/api/core";
 import type { AgentType } from "../types/pty";
 import type {
+  CanvasEdge,
   CanvasNode,
+  FlowmieEdge,
   FlowmieRFNode,
   TerminalNodeData,
   TerminalRFNode,
@@ -89,13 +100,37 @@ function fromCanvasNode(canvasNode: CanvasNode): FlowmieRFNode {
   return node;
 }
 
+function toCanvasEdge(edge: FlowmieEdge): CanvasEdge {
+  return {
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+    direction: edge.data?.direction ?? "source-to-target",
+    enabled: edge.data?.enabled ?? true,
+  };
+}
+
+function fromCanvasEdge(canvasEdge: CanvasEdge): FlowmieEdge {
+  return {
+    id: canvasEdge.id,
+    type: "relay",
+    source: canvasEdge.source,
+    target: canvasEdge.target,
+    data: { direction: canvasEdge.direction, enabled: canvasEdge.enabled },
+  };
+}
+
 interface WorkspaceState {
   workspaceId: string;
   name: string;
   createdAt: string;
   nodes: FlowmieRFNode[];
+  edges: FlowmieEdge[];
   viewport: Viewport;
   onNodesChange: OnNodesChange<FlowmieRFNode>;
+  onEdgesChange: OnEdgesChange<FlowmieEdge>;
+  onConnect: (connection: Connection) => void;
+  toggleEdge: (edgeId: string) => void;
   setViewport: (viewport: Viewport) => void;
   addTerminal: (agentType: AgentType, cwd?: string, position?: { x: number; y: number }) => Promise<void>;
   addWebview: (url: string, label: string, position?: { x: number; y: number }) => Promise<void>;
@@ -111,10 +146,44 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   name: "Untitled Workspace",
   createdAt: new Date().toISOString(),
   nodes: [],
+  edges: [],
   viewport: { x: 0, y: 0, zoom: 1 },
 
   onNodesChange: (changes: NodeChange<FlowmieRFNode>[]) => {
     set({ nodes: applyNodeChanges(changes, get().nodes) });
+  },
+
+  onEdgesChange: (changes: EdgeChange<FlowmieEdge>[]) => {
+    set({ edges: applyEdgeChanges(changes, get().edges) });
+  },
+
+  onConnect: (connection: Connection) => {
+    // Relays only make sense terminal -> terminal; reject anything else
+    // (e.g. a webview endpoint) rather than creating an inert edge.
+    const nodes = get().nodes;
+    const source = nodes.find((n) => n.id === connection.source);
+    const target = nodes.find((n) => n.id === connection.target);
+    if (source?.type !== "terminal" || target?.type !== "terminal") return;
+    if (connection.source === connection.target) return;
+
+    const edge: FlowmieEdge = {
+      id: newId(),
+      type: "relay",
+      source: connection.source,
+      target: connection.target,
+      data: { direction: "source-to-target", enabled: true },
+    };
+    set({ edges: addEdge(edge, get().edges) });
+  },
+
+  toggleEdge: (edgeId: string) => {
+    set({
+      edges: get().edges.map((e) =>
+        e.id === edgeId
+          ? { ...e, data: { ...e.data!, enabled: !e.data!.enabled } }
+          : e,
+      ),
+    });
   },
 
   setViewport: (viewport) => set({ viewport }),
@@ -177,7 +246,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     if (node?.type === "webview" && node.data.webviewLabel) {
       await invoke("webview_destroy", { webviewLabel: node.data.webviewLabel });
     }
-    set({ nodes: get().nodes.filter((n) => n.id !== nodeId) });
+    set({
+      nodes: get().nodes.filter((n) => n.id !== nodeId),
+      // Drop any relay edges dangling from the removed node.
+      edges: get().edges.filter((e) => e.source !== nodeId && e.target !== nodeId),
+    });
   },
 
   respawnNode: async (nodeId) => {
@@ -229,7 +302,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       updatedAt: new Date().toISOString(),
       viewport: state.viewport,
       nodes: state.nodes.map(toCanvasNode),
-      edges: [],
+      edges: state.edges.map(toCanvasEdge),
     };
     await invoke("workspace_save", { workspace });
   },
@@ -242,6 +315,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       createdAt: workspace.createdAt,
       viewport: workspace.viewport,
       nodes: workspace.nodes.map(fromCanvasNode),
+      edges: workspace.edges.map(fromCanvasEdge),
     });
   },
 

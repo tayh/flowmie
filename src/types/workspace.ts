@@ -1,4 +1,4 @@
-import type { Node } from "@xyflow/react";
+import type { Edge, Node } from "@xyflow/react";
 import type { AgentType } from "./pty";
 
 export interface Viewport {
@@ -41,11 +41,15 @@ export interface WebviewNodeData {
 
 export type CanvasNode = TerminalNodeData | WebviewNodeData;
 
+export type EdgeDirection = "source-to-target" | "bidirectional";
+
 export interface CanvasEdge {
   id: string;
   source: string;
   target: string;
-  direction: "source-to-target" | "bidirectional";
+  direction: EdgeDirection;
+  // Whether the relay is currently active; toggled per-edge for debugging.
+  enabled: boolean;
 }
 
 export interface Workspace {
@@ -82,3 +86,11 @@ export interface WebviewNodePayload extends Record<string, unknown> {
 export type TerminalRFNode = Node<TerminalNodePayload, "terminal">;
 export type WebviewRFNode = Node<WebviewNodePayload, "webview">;
 export type FlowmieRFNode = TerminalRFNode | WebviewRFNode;
+
+/** React Flow edge data payload. */
+export interface RelayEdgePayload extends Record<string, unknown> {
+  direction: EdgeDirection;
+  enabled: boolean;
+}
+
+export type FlowmieEdge = Edge<RelayEdgePayload, "relay">;

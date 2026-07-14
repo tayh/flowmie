@@ -1,0 +1,23 @@
+.relay-edge__toggle {
+  position: absolute;
+  pointer-events: all;
+  font-family: Menlo, Consolas, monospace;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  border: 1px solid #4aa3ff;
+  background-color: #14314f;
+  color: #cfe6ff;
+  cursor: pointer;
+  user-select: none;
+}
+
+.relay-edge__toggle:hover {
+  background-color: #1c4a73;
+}
+
+.relay-edge__toggle--off {
+  border-color: #666;
+  background-color: #2a2a2a;
+  color: #999;
+}
