@@ -5,12 +5,27 @@ import { useWorkspace } from "./useWorkspace";
 import { trimResponse } from "../lib/sanitize";
 import type { PtyDataEvent } from "../types/pty";
 import type { FlowmieEdge, TerminalRFNode } from "../types/workspace";
+import { skillsDefault } from "../types/workspace";
+
+// A skill-enabled agent communicates through the explicit send_message channel
+// (F002), so its full-screen TUI output must NOT be scraped and forwarded — that
+// scraping is what leaked terminal furniture (spinners, status bars, input-box
+// text) into a peer's input. The passive relay stays only for non-skill sources
+// (e.g. a plain shell, whose line output is meaningfully forwardable).
+function isSkillEnabled(node: TerminalRFNode): boolean {
+  return node.data.skillsEnabled ?? skillsDefault(node.data.agentType);
+}
 
 // How long a source terminal must stay quiet before we treat its buffered
 // output as a finished response and relay it. The spec's acceptance
 // criterion is explicitly "after the agent finishes its response", and
 // idle-detection is the "simple trimming heuristic" it sanctions.
-const IDLE_MS = 800;
+//
+// This has to be long enough to sit through an interactive agent's natural
+// pauses (streaming a reply, "thinking") — at 800ms it fired between slow
+// keystrokes and mid-stream, dumping fragments. A couple of seconds of true
+// silence is a much better "the agent is done" signal.
+const IDLE_MS = 2500;
 
 /**
  * Orchestrates terminal-to-terminal relays entirely on the frontend, which
@@ -70,8 +85,13 @@ export function useRelay() {
 
         if (targetNode.type === "terminal") {
           if (!targetNode.data.ptyId) continue;
-          // Trailing carriage return submits the relayed message to the agent.
-          void invoke("pty_write", { ptyId: targetNode.data.ptyId, data: `${message}\r` });
+          // Deliver via the agent-aware submit path: TUI agents get the text
+          // as bracketed paste (nothing dropped) followed by a submit.
+          void invoke("pty_submit", {
+            ptyId: targetNode.data.ptyId,
+            text: message,
+            agentType: targetNode.data.agentType,
+          });
         } else if (targetNode.type === "note") {
           // Append the response to the note rather than feeding it as input.
           const existing = targetNode.data.content;
@@ -84,6 +104,9 @@ export function useRelay() {
     const unlistenPromise = listen<PtyDataEvent>("pty://data", (event) => {
       const sourceNode = terminalByPtyId(event.payload.ptyId);
       if (!sourceNode) return;
+      // Skill-enabled agents talk via send_message, not by having their screen
+      // scraped — never buffer/forward their raw output.
+      if (isSkillEnabled(sourceNode)) return;
       // Only buffer terminals that actually feed an enabled relay.
       if (outgoingEdges(sourceNode.id).length === 0) return;
 

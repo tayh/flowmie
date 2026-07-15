@@ -11,6 +11,8 @@ import { useWorkspace } from "../../hooks/useWorkspace";
 import { useWebviewSync } from "../../hooks/useWebviewSync";
 import { useRelay } from "../../hooks/useRelay";
 import { usePersistence } from "../../hooks/usePersistence";
+import { useSkillsSync } from "../../hooks/useSkillsSync";
+import { useSkillMessages } from "../../hooks/useSkillActivity";
 import { TerminalNode } from "./TerminalNode";
 import { WebviewNode } from "./WebviewNode";
 import { NoteNode } from "./NoteNode";
@@ -42,6 +44,8 @@ export function Canvas() {
   const { syncNode, syncAllWebviews } = useWebviewSync();
   useRelay();
   usePersistence();
+  useSkillsSync();
+  useSkillMessages();
 
   const handleMoveEnd = useCallback(
     (_: unknown, vp: Viewport) => {

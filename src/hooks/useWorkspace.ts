@@ -26,6 +26,7 @@ import type {
   Workspace,
   WorkspaceSummary,
 } from "../types/workspace";
+import { skillsDefault } from "../types/workspace";
 import { flowNodeToWindowBounds, webviewContentArea } from "../lib/webviewBounds";
 
 const DEFAULT_TERMINAL_SIZE = { width: 480, height: 320 };
@@ -81,6 +82,7 @@ function toCanvasNode(node: FlowmieRFNode): CanvasNode {
     agentType: node.data.agentType,
     role: node.data.role,
     cwd: node.data.cwd,
+    skillsEnabled: node.data.skillsEnabled ?? skillsDefault(node.data.agentType),
     ptyId: null,
   };
   return data;
@@ -122,6 +124,7 @@ function fromCanvasNode(canvasNode: CanvasNode): FlowmieRFNode {
       agentType: canvasNode.agentType,
       role: canvasNode.role,
       cwd: canvasNode.cwd,
+      skillsEnabled: canvasNode.skillsEnabled ?? skillsDefault(canvasNode.agentType),
       ptyId: null,
     },
   };
@@ -159,6 +162,7 @@ interface WorkspaceState {
   onEdgesChange: OnEdgesChange<FlowmieEdge>;
   onConnect: (connection: Connection) => void;
   toggleEdge: (edgeId: string) => void;
+  toggleEdgeDirection: (edgeId: string) => void;
   setViewport: (viewport: Viewport) => void;
   addTerminal: (
     agentType: AgentType,
@@ -231,17 +235,41 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     });
   },
 
+  // Flip a relay between one-way (source→target) and two-way. Two-way is what
+  // lets a messaged agent's reply flow back (and wait_for_reply resolve).
+  toggleEdgeDirection: (edgeId: string) => {
+    set({
+      edges: get().edges.map((e) =>
+        e.id === edgeId
+          ? {
+              ...e,
+              data: {
+                ...e.data!,
+                direction:
+                  e.data!.direction === "bidirectional"
+                    ? "source-to-target"
+                    : "bidirectional",
+              },
+            }
+          : e,
+      ),
+    });
+  },
+
   setViewport: (viewport) => set({ viewport }),
 
   addTerminal: async (agentType, opts = {}) => {
     const { cwd = "", role, position } = opts;
     const id = newId();
+    const skillsEnabled = skillsDefault(agentType);
     const index = get().nodes.length;
     const spawnPosition = position ?? { x: 80 + index * 40, y: 80 + index * 40 };
     const { ptyId } = await invoke<{ ptyId: string }>("pty_spawn", {
       agentType,
       cwd,
       role,
+      nodeId: id,
+      skillsEnabled,
     });
     const node: TerminalRFNode = {
       id,
@@ -249,7 +277,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       position: spawnPosition,
       width: DEFAULT_TERMINAL_SIZE.width,
       height: DEFAULT_TERMINAL_SIZE.height,
-      data: { agentType, cwd, role, ptyId },
+      data: { agentType, cwd, role, skillsEnabled, ptyId },
     };
     set({ nodes: [...get().nodes, node] });
   },
@@ -331,6 +359,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
         agentType: node.data.agentType,
         cwd: node.data.cwd,
         role: node.data.role,
+        nodeId: node.id,
+        skillsEnabled: node.data.skillsEnabled ?? skillsDefault(node.data.agentType),
       });
       set({
         nodes: get().nodes.map((n) =>
@@ -404,6 +434,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
               agentType: canvasNode.agentType,
               cwd: canvasNode.cwd,
               role: canvasNode.role,
+              nodeId: canvasNode.id,
+              skillsEnabled: canvasNode.skillsEnabled ?? skillsDefault(canvasNode.agentType),
             });
             node.data = { ...node.data, ptyId };
           } catch {

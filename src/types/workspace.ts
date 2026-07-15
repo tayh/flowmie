@@ -26,6 +26,9 @@ export interface TerminalNodeData {
   agentType: AgentType;
   role?: string;
   cwd: string;
+  // Whether this agent is wired to the skills bridge (F002). Defaults to true
+  // for agent types and false for shell; see skillsDefault().
+  skillsEnabled?: boolean;
   // Runtime-only; always null on disk. Set again after a manual respawn.
   ptyId: string | null;
 }
@@ -82,7 +85,13 @@ export interface TerminalNodePayload extends Record<string, unknown> {
   agentType: AgentType;
   role?: string;
   cwd: string;
+  skillsEnabled?: boolean;
   ptyId: string | null;
+}
+
+/** Skills are on by default for real agents, off for a plain shell. */
+export function skillsDefault(agentType: AgentType): boolean {
+  return agentType !== "shell";
 }
 
 export interface WebviewNodePayload extends Record<string, unknown> {

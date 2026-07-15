@@ -27,3 +27,15 @@ pub struct WebviewLoadedEvent {
     #[serde(rename = "webviewLabel")]
     pub webview_label: String,
 }
+
+/// Emitted when one agent delivers a directed message to another (F002
+/// Phase 2). Drives the canvas edge animation.
+#[derive(Clone, Serialize)]
+pub struct SkillMessageEvent {
+    #[serde(rename = "fromNodeId")]
+    pub from_node_id: String,
+    #[serde(rename = "toNodeId")]
+    pub to_node_id: String,
+    #[serde(rename = "messageId")]
+    pub message_id: String,
+}
