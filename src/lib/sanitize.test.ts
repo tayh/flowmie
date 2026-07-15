@@ -30,9 +30,18 @@ describe("stripAnsi", () => {
     expect(stripAnsi("just text 123")).toBe("just text 123");
   });
 
-  it("guarantees no escape byte survives", () => {
-    const noisy = "\x1b[38;2;255;0;0mfoo\x1b[0m\x1b]0;t\x07\x1b(B bar";
-    expect(stripAnsi(noisy)).not.toMatch(/\x1b/);
+  it("removes charset-designation sequences without leaking their tail", () => {
+    // Regression: `ESC ( B` previously left a stray "(B" once the ESC byte
+    // alone was stripped as a control char.
+    expect(stripAnsi("\x1b(Bhello")).toBe("hello");
+    expect(stripAnsi("a\x1b)0b")).toBe("ab");
+  });
+
+  it("guarantees no escape byte or its tail survives a mixed stream", () => {
+    const noisy = "\x1b[38;2;255;0;0mfoo\x1b[0m\x1b]0;t\x07\x1b(B bar\x1b)0";
+    const out = stripAnsi(noisy);
+    expect(out).not.toMatch(/\x1b/);
+    expect(out).toBe("foo bar");
   });
 });
 

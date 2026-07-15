@@ -1,14 +1,21 @@
 import type { AgentType } from "../types/pty";
 
-// Matches the ANSI escape families a terminal agent emits: CSI sequences
-// (colors, cursor moves, erase), OSC sequences (window title, hyperlinks,
-// terminated by BEL or ST), and standalone single-character escapes.
+// Matches the ANSI escape families a terminal agent emits:
+// - CSI: colors, cursor moves, erase — ESC [ params intermediates final
 // eslint-disable-next-line no-control-regex
 const CSI_RE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+// - OSC: window title, hyperlinks — ESC ] ... terminated by BEL or ST
 // eslint-disable-next-line no-control-regex
 const OSC_RE = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+// - nF sequences: ESC + one-or-more intermediate bytes (0x20-0x2F) + final
+//   byte (0x30-0x7E). Covers charset designation like `ESC ( B` / `ESC ) 0`,
+//   which otherwise leak their tail (`(B`, `)0`) once the ESC byte alone is
+//   stripped as a control char.
 // eslint-disable-next-line no-control-regex
-const SINGLE_ESC_RE = /\x1b[@-Z\\-_]/g;
+const NF_RE = /\x1b[ -/]+[0-~]/g;
+// - Standalone Fe/Fs single-char escapes (ESC + one byte 0x40-0x5F or 0x60-0x7E).
+// eslint-disable-next-line no-control-regex
+const SINGLE_ESC_RE = /\x1b[@-~]/g;
 // Remaining C0 control chars except \n and \t, which we keep as real text.
 // eslint-disable-next-line no-control-regex
 const CONTROL_RE = /[\x00-\x08\x0b-\x1f\x7f]/g;
@@ -18,6 +25,7 @@ export function stripAnsi(input: string): string {
   return input
     .replace(OSC_RE, "")
     .replace(CSI_RE, "")
+    .replace(NF_RE, "")
     .replace(SINGLE_ESC_RE, "")
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
