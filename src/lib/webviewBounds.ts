@@ -50,6 +50,32 @@ export function flowNodeToWindowBounds(
 }
 
 /**
+ * The inverse of {@link flowNodeToWindowBounds} for a point: turns a **physical**
+ * window pixel (what Tauri's native drag-drop event reports) into a flow-space
+ * position, so a dropped file lands under the cursor (F003).
+ *
+ * Two conversions, in order, and both matter:
+ *  1. physical → logical/CSS pixels, dividing by the device pixel ratio — on a
+ *     HiDPI screen (ratio 2) skipping this drops the node at twice the offset.
+ *  2. logical window point → flow space, inverting `screen = flow * zoom + viewport`
+ *     after removing the container's own offset from the window origin.
+ */
+export function windowPointToFlowPosition(
+  point: FlowPosition,
+  viewport: FlowViewport,
+  containerOffset: ContainerOffset,
+  devicePixelRatio: number,
+): FlowPosition {
+  const ratio = devicePixelRatio > 0 ? devicePixelRatio : 1;
+  const logicalX = point.x / ratio;
+  const logicalY = point.y / ratio;
+  return {
+    x: (logicalX - containerOffset.left - viewport.x) / viewport.zoom,
+    y: (logicalY - containerOffset.top - viewport.y) / viewport.zoom,
+  };
+}
+
+/**
  * Must match the fixed height of .webview-node__titlebar in
  * WebviewNode.css. The native overlay sits on top of everything in its
  * bounds, so it has to be inset below the titlebar or it hides it entirely.

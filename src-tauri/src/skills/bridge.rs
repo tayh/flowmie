@@ -15,8 +15,9 @@ use tiny_http::{Header, Method, Request, Response, Server};
 
 use super::{
     agents_for, can_access_resource, can_reach, can_receive, can_send, connections_for,
-    sanitize_message, whoami, NoteInfo, Snapshot,
+    sanitize_message, whoami, FileInfo, NoteInfo, Snapshot,
 };
+use crate::files;
 use crate::commands::capture_webview_resource;
 use crate::events::{ResourceCreatedEvent, SkillMessageEvent};
 use crate::pty::manager::PtyManager;
@@ -158,6 +159,65 @@ fn note_resource(note: &NoteInfo) -> ResourceRef {
         created_at: String::new(),
         path: String::new(),
     }
+}
+
+/// A file node offered to an agent wired to it (F003). Its id is
+/// `file:<nodeId>`; `path` is the **real** path on disk, not a store blob, and
+/// `ownerNodeId` is the file node itself — so the edge to that node is what
+/// authorizes the read, exactly like every other resource.
+fn file_resource(file: &FileInfo) -> ResourceRef {
+    let mime = if file.is_directory {
+        files::DIRECTORY_MIME.to_string()
+    } else {
+        files::mime_for_path(&file.path)
+    };
+    ResourceRef {
+        id: format!("file:{}", file.id),
+        kind: if file.is_directory {
+            "file".to_string()
+        } else {
+            files::kind_for_mime(&mime).to_string()
+        },
+        mime,
+        label: if file.label.is_empty() {
+            file.path.clone()
+        } else {
+            file.label.clone()
+        },
+        owner_node_id: Some(file.id.clone()),
+        created_at: String::new(),
+        path: file.path.clone(),
+    }
+}
+
+/// Resolve `file:<id>` to the file node the caller is allowed to read, or the
+/// error response to send back. Pure (no `AppHandle`, no disk) so the whole
+/// authorization decision is unit-testable — the disk read happens in the
+/// caller once this says yes.
+fn resolve_file_read(
+    snapshot: &Snapshot,
+    caller: &str,
+    file_id: &str,
+) -> Result<FileInfo, (u16, String)> {
+    let Some(file) = snapshot.files.iter().find(|f| f.id == file_id) else {
+        return Err((404, "{\"error\":\"unknown file node\"}".into()));
+    };
+    // Direction-agnostic: a file is passive, like a Portal — a wire in either
+    // orientation is the user saying "this agent may read this".
+    if !can_reach(snapshot, caller, file_id) {
+        return Err((
+            403,
+            "{\"error\":\"not connected: that file is not wired to you\"}".into(),
+        ));
+    }
+    if file.is_directory {
+        return Err((
+            400,
+            "{\"error\":\"that file node is a folder; reading folders is not supported yet\"}"
+                .into(),
+        ));
+    }
+    Ok(file.clone())
 }
 
 fn json_response(status: u16, body: String) -> Response<std::io::Cursor<Vec<u8>>> {
@@ -404,12 +464,35 @@ fn handle_list_resources(h: &Handlers, caller: &str, owner: Option<&str>) -> (u1
             refs.push(note_resource(note));
         }
     }
+    // A file node is offered to any agent an enabled edge connects it to
+    // (F003). An unwired file node is invisible here — that is the feature.
+    for file in &snap.files {
+        if can_reach(&snap, caller, &file.id) && owner.is_none_or(|o| o == file.id) {
+            refs.push(file_resource(file));
+        }
+    }
     (200, serde_json::to_string(&refs).unwrap())
 }
 
 /// `get_resource`: materialize a resource the caller may access. A `note:<id>`
-/// id returns the note's live text; otherwise the on-disk blob (path/inline).
+/// returns the note's live text, a `file:<id>` reads that file node's path from
+/// disk right now; otherwise the on-disk blob (path/inline).
 fn handle_get_resource(h: &Handlers, caller: &str, id: &str, as_: &str) -> (u16, String) {
+    if let Some(file_id) = id.strip_prefix("file:") {
+        let file = {
+            let snap = h.snapshot.lock().unwrap();
+            match resolve_file_read(&snap, caller, file_id) {
+                Ok(file) => file,
+                Err(err) => return err,
+            }
+        };
+        // Read the disk now, not at drop time — this is the live-pointer promise.
+        return match files::read(&file.path, as_) {
+            Ok(result) => (200, serde_json::to_string(&result).unwrap()),
+            Err(e) => (404, serde_json::json!({ "error": e }).to_string()),
+        };
+    }
+
     if let Some(note_id) = id.strip_prefix("note:") {
         let snap = h.snapshot.lock().unwrap();
         return match snap.notes.iter().find(|n| n.id == note_id) {
@@ -693,6 +776,78 @@ mod tests {
             direction: "bidirectional".into(),
             enabled: true,
         }
+    }
+
+    /// A snapshot with one terminal `a` and one file node `f`, wired per `edges`.
+    fn file_snap(edges: Vec<EdgeInfo>, is_directory: bool) -> Snapshot {
+        Snapshot {
+            terminals: vec![TerminalInfo {
+                id: "a".into(),
+                agent_type: "claude".into(),
+                role: None,
+                cwd: String::new(),
+                pty_id: Some("pty-a".into()),
+            }],
+            edges,
+            files: vec![FileInfo {
+                id: "f".into(),
+                path: "/tmp/spec.md".into(),
+                label: "spec.md".into(),
+                is_directory,
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn file_edge(source: &str, target: &str, enabled: bool) -> EdgeInfo {
+        EdgeInfo {
+            source: source.into(),
+            target: target.into(),
+            direction: "source-to-target".into(),
+            enabled,
+        }
+    }
+
+    #[test]
+    fn file_read_is_allowed_through_an_edge_in_either_orientation() {
+        // file -> agent
+        let snap = file_snap(vec![file_edge("f", "a", true)], false);
+        assert_eq!(resolve_file_read(&snap, "a", "f").unwrap().path, "/tmp/spec.md");
+
+        // agent -> file: a file is passive, so the wire grants the read either way.
+        let snap = file_snap(vec![file_edge("a", "f", true)], false);
+        assert_eq!(resolve_file_read(&snap, "a", "f").unwrap().path, "/tmp/spec.md");
+    }
+
+    #[test]
+    fn file_read_is_denied_without_an_edge() {
+        // An unwired file node is invisible: the wire is the whole grant.
+        let snap = file_snap(vec![], false);
+        let (status, body) = resolve_file_read(&snap, "a", "f").unwrap_err();
+        assert_eq!(status, 403);
+        assert!(body.contains("not connected"));
+    }
+
+    #[test]
+    fn disabling_the_edge_revokes_the_file_read() {
+        let snap = file_snap(vec![file_edge("f", "a", false)], false);
+        assert_eq!(resolve_file_read(&snap, "a", "f").unwrap_err().0, 403);
+    }
+
+    #[test]
+    fn unknown_file_node_is_404_not_403() {
+        // Distinct from a denial: the agent should be able to tell "no such
+        // node" from "not allowed".
+        let snap = file_snap(vec![file_edge("f", "a", true)], false);
+        assert_eq!(resolve_file_read(&snap, "a", "nope").unwrap_err().0, 404);
+    }
+
+    #[test]
+    fn folder_nodes_are_rejected_until_phase_2() {
+        let snap = file_snap(vec![file_edge("f", "a", true)], true);
+        let (status, body) = resolve_file_read(&snap, "a", "f").unwrap_err();
+        assert_eq!(status, 400);
+        assert!(body.contains("folder"));
     }
 
     #[test]

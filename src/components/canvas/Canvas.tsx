@@ -1,4 +1,4 @@
-import { useCallback, type DragEvent } from "react";
+import { useCallback } from "react";
 import {
   Background,
   Controls,
@@ -14,35 +14,22 @@ import { usePersistence } from "../../hooks/usePersistence";
 import { useSkillsSync } from "../../hooks/useSkillsSync";
 import { useSkillMessages } from "../../hooks/useSkillActivity";
 import { useResources } from "../../hooks/useResources";
+import { useFileDrop } from "../../hooks/useFileDrop";
 import { TerminalNode } from "./TerminalNode";
 import { WebviewNode } from "./WebviewNode";
 import { NoteNode } from "./NoteNode";
+import { FileNode } from "./FileNode";
 import { RelayEdge } from "./RelayEdge";
 import { NewNodeMenu } from "../toolbar/NewNodeMenu";
 import { WorkspaceMenu } from "../toolbar/WorkspaceMenu";
-import type { FlowmieRFNode, ResourceKind, Viewport } from "../../types/workspace";
+import type { FlowmieRFNode, Viewport } from "../../types/workspace";
 import "./Canvas.css";
-
-/** The base64 payload of a dropped file, without the `data:...;base64,` prefix. */
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
-
-function kindForMime(mime: string): ResourceKind {
-  if (mime.startsWith("image/")) return "image";
-  if (mime.startsWith("text/")) return "text";
-  return "file";
-}
 
 const nodeTypes: NodeTypes = {
   terminal: TerminalNode,
   webview: WebviewNode,
   note: NoteNode,
+  file: FileNode,
 };
 const edgeTypes: EdgeTypes = { relay: RelayEdge };
 
@@ -58,13 +45,14 @@ export function Canvas() {
   const addTerminal = useWorkspace((s) => s.addTerminal);
   const addWebview = useWorkspace((s) => s.addWebview);
   const addNote = useWorkspace((s) => s.addNote);
-  const registerResource = useWorkspace((s) => s.registerResource);
+  const addFile = useWorkspace((s) => s.addFile);
   const { syncNode, syncAllWebviews } = useWebviewSync();
   useRelay();
   usePersistence();
   useSkillsSync();
   useSkillMessages();
   useResources();
+  useFileDrop();
 
   const handleMoveEnd = useCallback(
     (_: unknown, vp: Viewport) => {
@@ -81,34 +69,8 @@ export function Canvas() {
     [syncNode],
   );
 
-  // Dropping OS files (images/text/etc.) onto the canvas registers them as
-  // user-owned resources (ownerNodeId = null) any agent can then be handed.
-  const handleCanvasDragOver = useCallback((e: DragEvent) => {
-    if (e.dataTransfer.types.includes("Files")) e.preventDefault();
-  }, []);
-
-  const handleCanvasDrop = useCallback(
-    (e: DragEvent) => {
-      const files = Array.from(e.dataTransfer.files);
-      if (files.length === 0) return;
-      e.preventDefault();
-      for (const file of files) {
-        void fileToBase64(file).then((dataBase64) =>
-          registerResource({
-            kind: kindForMime(file.type),
-            mime: file.type || "application/octet-stream",
-            label: file.name,
-            ownerNodeId: null,
-            dataBase64,
-          }),
-        );
-      }
-    },
-    [registerResource],
-  );
-
   return (
-    <div className="canvas" onDragOver={handleCanvasDragOver} onDrop={handleCanvasDrop}>
+    <div className="canvas">
       <ReactFlow
         key={workspaceId}
         nodes={nodes}
@@ -134,6 +96,7 @@ export function Canvas() {
           onSelectWeb={(url, label) => void addWebview(url, label)}
           onSelectRole={(instruction) => void addTerminal("claude", { role: instruction })}
           onAddNote={() => addNote()}
+          onAddFile={(path) => void addFile(path)}
         />
         <WorkspaceMenu />
       </div>

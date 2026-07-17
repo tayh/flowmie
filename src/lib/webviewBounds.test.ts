@@ -1,8 +1,56 @@
 import { describe, expect, it } from "vitest";
-import { flowNodeToWindowBounds, webviewContentArea, WEBVIEW_TITLEBAR_HEIGHT } from "./webviewBounds";
+import {
+  flowNodeToWindowBounds,
+  webviewContentArea,
+  windowPointToFlowPosition,
+  WEBVIEW_TITLEBAR_HEIGHT,
+} from "./webviewBounds";
 
 const IDENTITY_VIEWPORT = { x: 0, y: 0, zoom: 1 };
 const NO_OFFSET = { left: 0, top: 0 };
+
+describe("windowPointToFlowPosition", () => {
+  it("is a no-op at zoom 1, no pan, no offset, ratio 1", () => {
+    expect(windowPointToFlowPosition({ x: 100, y: 50 }, IDENTITY_VIEWPORT, NO_OFFSET, 1)).toEqual({
+      x: 100,
+      y: 50,
+    });
+  });
+
+  it("halves physical pixels on a HiDPI screen", () => {
+    expect(windowPointToFlowPosition({ x: 200, y: 100 }, IDENTITY_VIEWPORT, NO_OFFSET, 2)).toEqual({
+      x: 100,
+      y: 50,
+    });
+  });
+
+  it("removes the container offset and the pan, then undoes the zoom", () => {
+    // logical 260,180 → minus offset 20,30 → minus pan 40,60 → /2 zoom
+    expect(
+      windowPointToFlowPosition(
+        { x: 260, y: 180 },
+        { x: 40, y: 60, zoom: 2 },
+        { left: 20, top: 30 },
+        1,
+      ),
+    ).toEqual({ x: 100, y: 45 });
+  });
+
+  it("round-trips against flowNodeToWindowBounds", () => {
+    const viewport = { x: 40, y: 60, zoom: 1.5 };
+    const offset = { left: 20, top: 30 };
+    const original = { x: 100, y: 45 };
+    const bounds = flowNodeToWindowBounds(original, { width: 1, height: 1 }, viewport, offset);
+    expect(windowPointToFlowPosition(bounds, viewport, offset, 1)).toEqual(original);
+  });
+
+  it("treats a nonsense pixel ratio as 1 rather than dividing by zero", () => {
+    expect(windowPointToFlowPosition({ x: 10, y: 10 }, IDENTITY_VIEWPORT, NO_OFFSET, 0)).toEqual({
+      x: 10,
+      y: 10,
+    });
+  });
+});
 
 describe("flowNodeToWindowBounds", () => {
   it("is a no-op at zoom 1 with no pan and no container offset", () => {

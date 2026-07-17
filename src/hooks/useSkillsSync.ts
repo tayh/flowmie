@@ -13,7 +13,7 @@ import type { FlowmieEdge, FlowmieRFNode } from "../types/workspace";
  * Debounced lightly — agents poll on demand, not per frame, but drags emit a
  * burst of node changes we don't need to forward individually.
  */
-function buildSnapshot(nodes: FlowmieRFNode[], edges: FlowmieEdge[]) {
+export function buildSnapshot(nodes: FlowmieRFNode[], edges: FlowmieEdge[]) {
   const terminals = nodes
     .filter((n): n is Extract<FlowmieRFNode, { type: "terminal" }> => n.type === "terminal")
     .map((n) => ({
@@ -41,7 +41,18 @@ function buildSnapshot(nodes: FlowmieRFNode[], edges: FlowmieEdge[]) {
       content: n.data.content,
       connectedTerminalId: n.data.connectedTerminalId,
     }));
-  return { terminals, edges: bridgeEdges, webviews, notes };
+  // File nodes (F003) carry a live path the bridge reads on demand; an agent
+  // sees one only when an enabled edge connects it, so the edges above are what
+  // actually grant access.
+  const files = nodes
+    .filter((n): n is Extract<FlowmieRFNode, { type: "file" }> => n.type === "file")
+    .map((n) => ({
+      id: n.id,
+      path: n.data.path,
+      label: n.data.label,
+      isDirectory: n.data.isDirectory,
+    }));
+  return { terminals, edges: bridgeEdges, webviews, notes, files };
 }
 
 export function useSkillsSync() {

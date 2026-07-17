@@ -1,0 +1,125 @@
+.file-node {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background-color: #1e2a2b;
+  border: 1px solid #2d474a;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.file-node--missing {
+  border-color: #7a3b3b;
+  background-color: #2b1e1e;
+}
+
+.file-node__titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  background-color: #1f3a3d;
+  color: #b0e2e8;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: grab;
+  user-select: none;
+}
+
+.file-node--missing .file-node__titlebar {
+  background-color: #3a1f1f;
+  color: #e8b0b0;
+}
+
+.file-node__titlebar button {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.file-node__titlebar button:hover {
+  color: #fff;
+  background-color: #2d474a;
+}
+
+.file-node__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  cursor: pointer;
+}
+
+.file-node--missing .file-node__body {
+  cursor: default;
+}
+
+.file-node__icon {
+  font-size: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* min-width:0 lets the ellipsis actually kick in inside a flex row. */
+.file-node__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.file-node__label {
+  color: #e6f6f8;
+  font-family: Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-node__dir {
+  color: #6f9296;
+  font-size: 10px;
+  /* The tail of a long path is the informative end, so clip the head. */
+  direction: rtl;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-node__missing {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  background-color: #3a1f1f;
+  color: #e8b0b0;
+  font-size: 11px;
+}
+
+.file-node__missing button {
+  background: none;
+  border: 1px solid #7a3b3b;
+  border-radius: 4px;
+  color: #e8b0b0;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+.file-node__missing button:hover {
+  color: #fff;
+  background-color: #7a3b3b;
+}

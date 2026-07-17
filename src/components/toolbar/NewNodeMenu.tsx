@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import type { AgentType } from "../../types/pty";
 import "./NewNodeMenu.css";
 
@@ -39,6 +40,7 @@ interface NewNodeMenuProps {
   onSelectWeb: (url: string, label: string) => void;
   onSelectRole: (instruction: string) => void;
   onAddNote: () => void;
+  onAddFile: (path: string) => void;
 }
 
 export function NewNodeMenu({
@@ -46,13 +48,26 @@ export function NewNodeMenu({
   onSelectWeb,
   onSelectRole,
   onAddNote,
+  onAddFile,
 }: NewNodeMenuProps) {
-  const [open, setOpen] = useState(false);
-  const [flyout, setFlyout] = useState<"web" | "roles" | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [flyout, setFlyout] = useState<"web" | "roles" | "file" | null>(null);
 
   function close() {
-    setOpen(false);
+    setMenuOpen(false);
     setFlyout(null);
+  }
+
+  // The native picker is the only way to get an absolute path — an HTML file
+  // input hands back a sandboxed File with no path, and a file node is a path.
+  async function handlePick(directory: boolean) {
+    const picked = await open({
+      directory,
+      multiple: false,
+      title: directory ? "Add a folder" : "Add a file",
+    });
+    if (typeof picked === "string") onAddFile(picked);
+    close();
   }
 
   function handleCustomUrl() {
@@ -70,10 +85,10 @@ export function NewNodeMenu({
 
   return (
     <div className="new-node-menu">
-      <button type="button" onClick={() => setOpen((o) => !o)}>
+      <button type="button" onClick={() => setMenuOpen((o) => !o)}>
         + New
       </button>
-      {open && (
+      {menuOpen && (
         <ul className="new-node-menu__list">
           {AGENTS.map((agent) => (
             <li key={agent.value}>
@@ -158,6 +173,28 @@ export function NewNodeMenu({
             >
               Note
             </button>
+          </li>
+
+          <li
+            className="new-node-menu__submenu"
+            onMouseEnter={() => setFlyout("file")}
+            onMouseLeave={() => setFlyout(null)}
+          >
+            <button type="button">File ▸</button>
+            {flyout === "file" && (
+              <ul className="new-node-menu__list new-node-menu__list--flyout">
+                <li>
+                  <button type="button" onClick={() => void handlePick(false)}>
+                    File…
+                  </button>
+                </li>
+                <li>
+                  <button type="button" onClick={() => void handlePick(true)}>
+                    Folder…
+                  </button>
+                </li>
+              </ul>
+            )}
           </li>
         </ul>
       )}

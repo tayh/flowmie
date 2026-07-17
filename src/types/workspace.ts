@@ -51,7 +51,21 @@ export interface NoteNodeData {
   connectedTerminalId: string | null;
 }
 
-export type CanvasNode = TerminalNodeData | WebviewNodeData | NoteNodeData;
+/** A file or folder on the canvas (F003). Unlike a blob resource, this is a
+ * *live pointer*: `path` is read from disk at call time, so edits on disk reach
+ * a connected agent on its next read. */
+export interface FileNodeData {
+  id: string;
+  type: "file";
+  position: Position;
+  size: Size;
+  // Absolute path to the file or folder this node points at.
+  path: string;
+  label: string;
+  isDirectory: boolean;
+}
+
+export type CanvasNode = TerminalNodeData | WebviewNodeData | NoteNodeData | FileNodeData;
 
 export type EdgeDirection = "source-to-target" | "bidirectional";
 
@@ -76,6 +90,14 @@ export interface ResourceRef {
   ownerNodeId: string | null;
   createdAt: string;
   path: string;
+}
+
+/** What `file_stat` reports about a path (F003). Mirrors src-tauri/src/files. */
+export interface FileStat {
+  exists: boolean;
+  isDirectory: boolean;
+  size: number;
+  mime: string;
 }
 
 export interface Workspace {
@@ -122,10 +144,20 @@ export interface NoteNodePayload extends Record<string, unknown> {
   connectedTerminalId: string | null;
 }
 
+export interface FileNodePayload extends Record<string, unknown> {
+  path: string;
+  label: string;
+  isDirectory: boolean;
+  // Runtime-only: whether the path was present at the last check. Not persisted
+  // — a file can appear or vanish between sessions, so it is re-checked on load.
+  missing: boolean;
+}
+
 export type TerminalRFNode = Node<TerminalNodePayload, "terminal">;
 export type WebviewRFNode = Node<WebviewNodePayload, "webview">;
 export type NoteRFNode = Node<NoteNodePayload, "note">;
-export type FlowmieRFNode = TerminalRFNode | WebviewRFNode | NoteRFNode;
+export type FileRFNode = Node<FileNodePayload, "file">;
+export type FlowmieRFNode = TerminalRFNode | WebviewRFNode | NoteRFNode | FileRFNode;
 
 /** React Flow edge data payload. */
 export interface RelayEdgePayload extends Record<string, unknown> {

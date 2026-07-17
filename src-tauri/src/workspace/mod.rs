@@ -56,12 +56,26 @@ pub struct NoteNodeData {
     pub connected_terminal_id: Option<String>,
 }
 
+/// A file or folder pinned to the canvas (F003). Mirrors `FileNodeData` in
+/// src/types/workspace.ts. Only the pointer is persisted — there is no blob.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct FileNodeData {
+    pub id: String,
+    pub position: Position,
+    pub size: Size,
+    pub path: String,
+    pub label: String,
+    #[serde(rename = "isDirectory", default)]
+    pub is_directory: bool,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum CanvasNode {
     Terminal(TerminalNodeData),
     Webview(WebviewNodeData),
     Note(NoteNodeData),
+    File(FileNodeData),
 }
 
 #[derive(Serialize, Deserialize, Clone)]

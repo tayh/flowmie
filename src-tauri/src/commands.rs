@@ -2,6 +2,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::events::ResourceCreatedEvent;
+use crate::files::{self, FileStat};
 use crate::pty::manager::PtyManager;
 use crate::resources::{decode_base64, ReadResult, ResourceRef, ResourceStore};
 use crate::skills::bridge::SkillsState;
@@ -225,6 +226,14 @@ pub async fn webview_capture(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Resolve a path for a file node (F003): what it is, how big, and whether it
+/// is still there. Called when a node is created (to learn `isDirectory`) and
+/// on workspace load (so a file deleted since last session shows as missing).
+#[tauri::command]
+pub fn file_stat(path: String) -> FileStat {
+    files::stat(&path)
 }
 
 /// Shared capture → register → emit path used by the `webview_capture` command

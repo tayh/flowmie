@@ -32,6 +32,7 @@ tiny_http = "0.12"
 # transport of resource blobs to/from agents and the frontend.
 sha2 = "0.10"
 base64 = "0.22"
+tauri-plugin-dialog = "2.7.1"
 
 # Tauri's public add_child API packs child webviews into the window's plain
 # vbox on Linux (no absolute positioning support), so positioned canvas

@@ -143,9 +143,10 @@ const TOOLS = [
     name: "list_resources",
     description:
       "List the resources you can access on the canvas: images and files a " +
-      "connected peer published, screenshots you captured, and the text of any " +
-      "note wired to you. Each entry has a resourceId you pass to get_resource. " +
-      "Pass nodeId to see only that node's resources.",
+      "connected peer published, screenshots you captured, the text of any " +
+      "note wired to you, and any file or folder pinned to the canvas and " +
+      "wired to you (resourceId 'file:<nodeId>'). Each entry has a resourceId " +
+      "you pass to get_resource. Pass nodeId to see only that node's resources.",
     inputSchema: {
       type: "object",
       properties: {
@@ -164,10 +165,13 @@ const TOOLS = [
     name: "get_resource",
     description:
       "Fetch a resource into your context by its resourceId (from " +
-      "list_resources). as='path' (default) writes it to a local file and " +
-      "returns the path — best for large or binary blobs a CLI reads by path. " +
-      "as='inline' returns text directly, or image data you can view if your " +
-      "client renders images. Fails if you are not connected to the owner.",
+      "list_resources). as='path' (default) returns a local path — best for " +
+      "large or binary content a CLI reads by path. as='inline' returns text " +
+      "directly, or image data you can view if your client renders images. " +
+      "For a 'file:<nodeId>' resource (a file pinned to the canvas) as='path' " +
+      "returns the file's REAL path, not a copy, and every read reflects the " +
+      "current contents on disk — so re-read it if it may have changed. " +
+      "Fails if you are not connected to the owner.",
     inputSchema: {
       type: "object",
       properties: {

@@ -1,5 +1,6 @@
 mod commands;
 mod events;
+mod files;
 mod pty;
 mod resources;
 mod skills;
@@ -14,6 +15,7 @@ use skills::bridge::SkillsState;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(PtyManager::default())
         .manage(SkillsState::new())
         .manage(ResourceStore::new())
@@ -42,6 +44,7 @@ pub fn run() {
             commands::resource_read,
             commands::resources_sync,
             commands::webview_capture,
+            commands::file_stat,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

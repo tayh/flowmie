@@ -129,6 +129,19 @@ pub struct NoteInfo {
     pub connected_terminal_id: Option<String>,
 }
 
+/// A file node (F003) the bridge surfaces to agents wired to it. Holds a live
+/// path — the bytes are read from disk at call time, never copied into the
+/// resource store.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FileInfo {
+    pub id: String,
+    pub path: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(rename = "isDirectory", default)]
+    pub is_directory: bool,
+}
+
 /// The current canvas topology as far as the bridge is concerned.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -140,6 +153,8 @@ pub struct Snapshot {
     pub webviews: Vec<WebviewInfo>,
     #[serde(default)]
     pub notes: Vec<NoteInfo>,
+    #[serde(default)]
+    pub files: Vec<FileInfo>,
 }
 
 /// The caller's own identity (`whoami`).
@@ -218,13 +233,19 @@ pub fn can_reach(snapshot: &Snapshot, a: &str, b: &str) -> bool {
         .any(|e| e.enabled && ((e.source == a && e.target == b) || (e.source == b && e.target == a)))
 }
 
-/// Whether `caller` may read a resource owned by `owner`. A user-dropped
-/// resource (`owner == None`) is readable by anyone; you can always read your
-/// own; otherwise you need an enabled edge that lets the owner's data reach you
-/// (`owner → caller`), mirroring how a peer's reply reaches you.
+/// Whether `caller` may read a resource owned by `owner`. You can always read
+/// your own; otherwise you need an enabled edge that lets the owner's data
+/// reach you (`owner → caller`), mirroring how a peer's reply reaches you.
+///
+/// An **unowned** resource (`owner == None`) is readable by **no one** (F003).
+/// It used to be readable by everyone, which was the one hole in "the edge
+/// graph is the permission graph" — an ownerless resource has no node, so it
+/// has no edges, so there is nothing on the canvas a user could point at to
+/// explain why an agent could read it. Files now arrive as file nodes, which
+/// have an owner and therefore an answer.
 pub fn can_access_resource(snapshot: &Snapshot, caller: &str, owner: Option<&str>) -> bool {
     match owner {
-        None => true,
+        None => false,
         Some(o) if o == caller => true,
         Some(o) => can_receive(snapshot, caller, o),
     }
@@ -438,9 +459,11 @@ mod tests {
             vec![term("a", "claude", None), term("b", "claude", None)],
             vec![edge("a", "b", "source-to-target", true)],
         );
-        // Owner reads own; anyone reads user-dropped (None).
+        // Owner reads own.
         assert!(can_access_resource(&s, "a", Some("a")));
-        assert!(can_access_resource(&s, "b", None));
+        // An unowned resource is readable by no one (F003): with no owner node
+        // there is no edge, and the edge is the whole grant.
+        assert!(!can_access_resource(&s, "b", None));
         // b may read a's resource (a -> b); a may not read b's.
         assert!(can_access_resource(&s, "b", Some("a")));
         assert!(!can_access_resource(&s, "a", Some("b")));

@@ -14,6 +14,9 @@ import type { AgentType } from "../types/pty";
 import type {
   CanvasEdge,
   CanvasNode,
+  FileNodeData,
+  FileRFNode,
+  FileStat,
   FlowmieEdge,
   FlowmieRFNode,
   NoteNodeData,
@@ -30,10 +33,12 @@ import type {
 } from "../types/workspace";
 import { skillsDefault } from "../types/workspace";
 import { flowNodeToWindowBounds, webviewContentArea } from "../lib/webviewBounds";
+import { basename } from "../lib/fileKind";
 
 const DEFAULT_TERMINAL_SIZE = { width: 480, height: 320 };
 const DEFAULT_WEBVIEW_SIZE = { width: 640, height: 520 };
 const DEFAULT_NOTE_SIZE = { width: 300, height: 220 };
+const DEFAULT_FILE_SIZE = { width: 260, height: 92 };
 
 function newId(): string {
   return crypto.randomUUID();
@@ -76,6 +81,18 @@ function toCanvasNode(node: FlowmieRFNode): CanvasNode {
     };
     return data;
   }
+  if (node.type === "file") {
+    const data: FileNodeData = {
+      id: node.id,
+      type: "file",
+      position: node.position,
+      size: nodeSize(node, DEFAULT_FILE_SIZE),
+      path: node.data.path,
+      label: node.data.label,
+      isDirectory: node.data.isDirectory,
+    };
+    return data;
+  }
   const data: TerminalNodeData = {
     id: node.id,
     type: "terminal",
@@ -112,6 +129,23 @@ function fromCanvasNode(canvasNode: CanvasNode): FlowmieRFNode {
       data: {
         content: canvasNode.content,
         connectedTerminalId: canvasNode.connectedTerminalId,
+      },
+    };
+    return node;
+  }
+  if (canvasNode.type === "file") {
+    const node: FileRFNode = {
+      id: canvasNode.id,
+      type: "file",
+      position: canvasNode.position,
+      width: canvasNode.size.width,
+      height: canvasNode.size.height,
+      data: {
+        path: canvasNode.path,
+        label: canvasNode.label,
+        isDirectory: canvasNode.isDirectory,
+        // Assume present; loadWorkspace re-stats and corrects this.
+        missing: false,
       },
     };
     return node;
@@ -187,6 +221,10 @@ interface WorkspaceState {
   addWebview: (url: string, label: string, position?: { x: number; y: number }) => Promise<void>;
   addNote: (position?: { x: number; y: number }) => void;
   updateNoteContent: (nodeId: string, content: string) => void;
+  // F003 file nodes.
+  addFile: (path: string, position?: { x: number; y: number }) => Promise<void>;
+  refreshFileNode: (nodeId: string) => Promise<void>;
+  relocateFile: (nodeId: string, path: string) => Promise<void>;
   removeNode: (nodeId: string) => Promise<void>;
   respawnNode: (nodeId: string) => Promise<void>;
   saveWorkspace: () => Promise<void>;
@@ -213,8 +251,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
 
   onConnect: (connection: Connection) => {
     // Valid wires: terminal→terminal (relay input), terminal→note (append
-    // output), and terminal↔webview (F002 Phase 3 — lets an agent connect to a
-    // Portal so it can capture it). At least one end must be a terminal.
+    // output), terminal↔webview (F002 Phase 3 — lets an agent connect to a
+    // Portal so it can capture it), and terminal↔file (F003 — grants the agent
+    // a read of that path). At least one end must be a terminal.
     const nodes = get().nodes;
     const source = nodes.find((n) => n.id === connection.source);
     const target = nodes.find((n) => n.id === connection.target);
@@ -222,8 +261,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const isTerminal = (n: FlowmieRFNode | undefined) => n?.type === "terminal";
     const valid =
       (isTerminal(source) &&
-        (isTerminal(target) || target?.type === "note" || target?.type === "webview")) ||
-      (source?.type === "webview" && isTerminal(target));
+        (isTerminal(target) ||
+          target?.type === "note" ||
+          target?.type === "webview" ||
+          target?.type === "file")) ||
+      ((source?.type === "webview" || source?.type === "file") && isTerminal(target));
     if (!source || !target || !valid) return;
 
     const edge: FlowmieEdge = {
@@ -378,6 +420,93 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     });
   },
 
+  // Pin a file or folder to the canvas (F003). The node stores the path, not
+  // the bytes — wiring it to an agent is what grants the read. `file_stat`
+  // resolves what the path actually is; a path that doesn't exist still gets a
+  // node (rendered missing) rather than silently doing nothing.
+  addFile: async (path, position) => {
+    const id = newId();
+    const index = get().nodes.length;
+    const filePosition = position ?? { x: 80 + index * 40, y: 80 + index * 40 };
+    let stat: FileStat = {
+      exists: false,
+      isDirectory: false,
+      size: 0,
+      mime: "application/octet-stream",
+    };
+    try {
+      stat = await invoke<FileStat>("file_stat", { path });
+    } catch {
+      // Leave it as missing; the node shows the state and offers Locate….
+    }
+    const node: FileRFNode = {
+      id,
+      type: "file",
+      position: filePosition,
+      width: DEFAULT_FILE_SIZE.width,
+      height: DEFAULT_FILE_SIZE.height,
+      data: {
+        path,
+        label: basename(path),
+        isDirectory: stat.isDirectory,
+        missing: !stat.exists,
+      },
+    };
+    set({ nodes: [...get().nodes, node] });
+  },
+
+  // Re-check a file node's path so a file deleted (or restored) outside the app
+  // is reflected. Called on load and when a read fails.
+  refreshFileNode: async (nodeId) => {
+    const node = get().nodes.find((n) => n.id === nodeId);
+    if (node?.type !== "file") return;
+    try {
+      const stat = await invoke<FileStat>("file_stat", { path: node.data.path });
+      set({
+        nodes: get().nodes.map((n) =>
+          n.id === nodeId && n.type === "file"
+            ? {
+                ...n,
+                data: { ...n.data, missing: !stat.exists, isDirectory: stat.isDirectory },
+              }
+            : n,
+        ),
+      });
+    } catch {
+      // Non-fatal: leave the last known state.
+    }
+  },
+
+  // Re-point a file node at a new path, keeping its id — and therefore its
+  // edges. Backs "Locate…" on a node whose file moved: the wires that grant
+  // access survive, so an agent's permission isn't silently rebuilt.
+  relocateFile: async (nodeId, path) => {
+    const node = get().nodes.find((n) => n.id === nodeId);
+    if (node?.type !== "file") return;
+    let stat: FileStat | null = null;
+    try {
+      stat = await invoke<FileStat>("file_stat", { path });
+    } catch {
+      return;
+    }
+    set({
+      nodes: get().nodes.map((n) =>
+        n.id === nodeId && n.type === "file"
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                path,
+                label: basename(path),
+                isDirectory: stat.isDirectory,
+                missing: !stat.exists,
+              },
+            }
+          : n,
+      ),
+    });
+  },
+
   addWebview: async (url, label, position) => {
     const id = newId();
     const index = get().nodes.length;
@@ -514,6 +643,16 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
             node.data = { ...node.data, ptyId };
           } catch {
             // Leave disconnected (respawn button available) if spawn fails.
+          }
+        }
+        if (node.type === "file" && canvasNode.type === "file") {
+          try {
+            // Re-check the path: a file node points outside the app, so it can
+            // have been moved or deleted since the workspace was saved.
+            const stat = await invoke<FileStat>("file_stat", { path: canvasNode.path });
+            node.data = { ...node.data, missing: !stat.exists, isDirectory: stat.isDirectory };
+          } catch {
+            // Leave as present; the node re-checks on its next read.
           }
         }
         if (node.type === "webview" && canvasNode.type === "webview") {
