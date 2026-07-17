@@ -183,3 +183,61 @@ pub fn destroy(app: &AppHandle, label: &str) -> Result<(), String> {
 
     rx.recv().map_err(|e| e.to_string())
 }
+
+/// Screenshot a Portal to PNG bytes via WebKit's async `get_snapshot` (F002
+/// Phase 3). WebKit renders through its own (often GL-composited) surface, so a
+/// naive `gdk_pixbuf_get_from_window` grab can come back blank — WebKit's own
+/// snapshot is the reliable source.
+///
+/// The snapshot is asynchronous: we schedule it on the GTK main thread (which
+/// owns the main context the async op requires) and its completion callback,
+/// fired on a later main-loop turn, sends the encoded PNG back over a channel.
+/// The **caller thread** (never the main thread) blocks on `rx.recv()`, so the
+/// GTK loop keeps running and the callback can fire. Callers on the single
+/// bridge server thread must therefore invoke this from a spawned thread.
+pub fn capture(app: &AppHandle, label: &str) -> Result<Vec<u8>, String> {
+    use webkit2gtk::{SnapshotOptions, SnapshotRegion, WebViewExt};
+
+    let main_window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window not found".to_string())?;
+    let window = main_window.as_ref().window();
+
+    let (tx, rx) = channel::<Result<Vec<u8>, String>>();
+    let label = label.to_string();
+
+    window
+        .run_on_main_thread(move || {
+            let webview = WEBVIEWS.with(|cell| cell.borrow().get(&label).map(|w| w.webview()));
+            let Some(webview) = webview else {
+                let _ = tx.send(Err(format!("no such webview: {label}")));
+                return;
+            };
+            // Kick off the async snapshot; the callback below runs later on this
+            // same main loop and reports the result back to the waiting caller.
+            webview.snapshot(
+                SnapshotRegion::Visible,
+                SnapshotOptions::NONE,
+                gtk::gio::Cancellable::NONE,
+                move |result| {
+                    let png = result
+                        .map_err(|e| e.to_string())
+                        .and_then(surface_to_png);
+                    let _ = tx.send(png);
+                },
+            );
+        })
+        .map_err(|e| e.to_string())?;
+
+    // Block off-main-thread until the snapshot callback delivers the PNG.
+    rx.recv().map_err(|e| e.to_string())?
+}
+
+/// Encode a cairo snapshot surface to PNG bytes.
+fn surface_to_png(surface: gtk::cairo::Surface) -> Result<Vec<u8>, String> {
+    let image = gtk::cairo::ImageSurface::try_from(surface)
+        .map_err(|_| "snapshot surface is not an image surface".to_string())?;
+    let mut buf = Vec::new();
+    image.write_to_png(&mut buf).map_err(|e| e.to_string())?;
+    Ok(buf)
+}

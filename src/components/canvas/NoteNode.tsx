@@ -1,14 +1,16 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { useWorkspace } from "../../hooks/useWorkspace";
 import type { NoteRFNode } from "../../types/workspace";
+import { ResourceTray, useResourceDropTarget } from "./ResourceTray";
 import "./NoteNode.css";
 
 export function NoteNode({ id, data }: NodeProps<NoteRFNode>) {
   const removeNode = useWorkspace((s) => s.removeNode);
   const updateNoteContent = useWorkspace((s) => s.updateNoteContent);
+  const dropTarget = useResourceDropTarget(id);
 
   return (
-    <div className="note-node">
+    <div className="note-node" onDragOver={dropTarget.onDragOver} onDrop={dropTarget.onDrop}>
       {/* Terminal -> note edges land here so agent output can flow in. */}
       <Handle type="target" position={Position.Left} />
       <div className="note-node__titlebar">
@@ -23,6 +25,7 @@ export function NoteNode({ id, data }: NodeProps<NoteRFNode>) {
         placeholder="Write a note, or connect a terminal to collect its output…"
         onChange={(e) => updateNoteContent(id, e.currentTarget.value)}
       />
+      <ResourceTray nodeId={id} />
     </div>
   );
 }

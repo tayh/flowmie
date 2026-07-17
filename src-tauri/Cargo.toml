@@ -28,6 +28,10 @@ dirs = "5"
 # Minimal blocking HTTP server for the agent-skills bridge (F002). Sync API,
 # no async runtime pulled in — the bridge runs on its own thread.
 tiny_http = "0.12"
+# Content-addressing (F002 Phase 3 resource store) and base64 for inline
+# transport of resource blobs to/from agents and the frontend.
+sha2 = "0.10"
+base64 = "0.22"
 
 # Tauri's public add_child API packs child webviews into the window's plain
 # vbox on Linux (no absolute positioning support), so positioned canvas
@@ -36,4 +40,12 @@ tiny_http = "0.12"
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
 wry = "0.55"
+# Portal screenshots (F002 Phase 3 capture_webview) call WebKit's async
+# get_snapshot on the wry webview widget. Pinned to the exact version wry 0.55
+# resolves (=2.0.2, feature v2_38) so the `WebView`/`cairo::Surface` types unify
+# with wry's — a mismatched version would not typecheck.
+webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
+# gtk re-exports cairo but not with the `png` feature that provides
+# ImageSurface::write_to_png; enable it here (features unify across the graph).
+cairo-rs = { version = "0.18", features = ["png"] }
 

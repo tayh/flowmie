@@ -6,6 +6,7 @@ import "@xterm/xterm/css/xterm.css";
 import { usePty } from "../../hooks/usePty";
 import { useWorkspace } from "../../hooks/useWorkspace";
 import type { TerminalRFNode } from "../../types/workspace";
+import { ResourceTray, useResourceDropTarget } from "./ResourceTray";
 import "./TerminalNode.css";
 
 export function TerminalNode({ id, data }: NodeProps<TerminalRFNode>) {
@@ -13,6 +14,7 @@ export function TerminalNode({ id, data }: NodeProps<TerminalRFNode>) {
   const terminalRef = useRef<Terminal | null>(null);
   const removeNode = useWorkspace((s) => s.removeNode);
   const respawnNode = useWorkspace((s) => s.respawnNode);
+  const dropTarget = useResourceDropTarget(id);
 
   const { status, exitCode, errorMessage, write, resize } = usePty(data.ptyId, (chunk) =>
     terminalRef.current?.write(chunk),
@@ -67,7 +69,7 @@ export function TerminalNode({ id, data }: NodeProps<TerminalRFNode>) {
   }, [status, exitCode, errorMessage]);
 
   return (
-    <div className="terminal-node">
+    <div className="terminal-node" onDragOver={dropTarget.onDragOver} onDrop={dropTarget.onDrop}>
       <Handle type="target" position={Position.Left} />
       <div className="terminal-node__titlebar">
         <span className="terminal-node__label">{data.agentType}</span>
@@ -83,6 +85,7 @@ export function TerminalNode({ id, data }: NodeProps<TerminalRFNode>) {
         </div>
       </div>
       <div className="terminal-node__body nodrag nopan nowheel" ref={containerRef} />
+      <ResourceTray nodeId={id} />
       <Handle type="source" position={Position.Right} />
     </div>
   );

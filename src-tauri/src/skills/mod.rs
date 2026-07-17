@@ -108,6 +108,27 @@ pub struct EdgeInfo {
     pub enabled: bool,
 }
 
+/// A webview (Portal) node the bridge needs to resolve for `capture_webview`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WebviewInfo {
+    pub id: String,
+    #[serde(rename = "webviewLabel", default)]
+    pub webview_label: Option<String>,
+    #[serde(default)]
+    pub label: String,
+}
+
+/// A note the bridge surfaces to a connected agent as a text resource (F002
+/// Phase 3). `connected_terminal_id` is the terminal the note is wired to.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NoteInfo {
+    pub id: String,
+    #[serde(default)]
+    pub content: String,
+    #[serde(rename = "connectedTerminalId", default)]
+    pub connected_terminal_id: Option<String>,
+}
+
 /// The current canvas topology as far as the bridge is concerned.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -115,6 +136,10 @@ pub struct Snapshot {
     pub terminals: Vec<TerminalInfo>,
     #[serde(default)]
     pub edges: Vec<EdgeInfo>,
+    #[serde(default)]
+    pub webviews: Vec<WebviewInfo>,
+    #[serde(default)]
+    pub notes: Vec<NoteInfo>,
 }
 
 /// The caller's own identity (`whoami`).
@@ -181,6 +206,28 @@ pub fn can_send(snapshot: &Snapshot, caller: &str, peer: &str) -> bool {
 /// The caller can receive from `peer` if any enabled edge permits peer → caller.
 pub fn can_receive(snapshot: &Snapshot, caller: &str, peer: &str) -> bool {
     snapshot.edges.iter().any(|e| edge_allows(e, peer, caller))
+}
+
+/// Whether any enabled edge connects `a` and `b`, ignoring direction. Used for
+/// capturing a webview (Portal), which is a passive node — a wire in either
+/// orientation authorizes an agent to screenshot it.
+pub fn can_reach(snapshot: &Snapshot, a: &str, b: &str) -> bool {
+    snapshot
+        .edges
+        .iter()
+        .any(|e| e.enabled && ((e.source == a && e.target == b) || (e.source == b && e.target == a)))
+}
+
+/// Whether `caller` may read a resource owned by `owner`. A user-dropped
+/// resource (`owner == None`) is readable by anyone; you can always read your
+/// own; otherwise you need an enabled edge that lets the owner's data reach you
+/// (`owner → caller`), mirroring how a peer's reply reaches you.
+pub fn can_access_resource(snapshot: &Snapshot, caller: &str, owner: Option<&str>) -> bool {
+    match owner {
+        None => true,
+        Some(o) if o == caller => true,
+        Some(o) => can_receive(snapshot, caller, o),
+    }
 }
 
 /// Collapse an agent-authored message into a single submittable line: control
@@ -283,7 +330,11 @@ mod tests {
     }
 
     fn snap(terminals: Vec<TerminalInfo>, edges: Vec<EdgeInfo>) -> Snapshot {
-        Snapshot { terminals, edges }
+        Snapshot {
+            terminals,
+            edges,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -363,6 +414,36 @@ mod tests {
         assert!(!can_receive(&s, "a", "b"));
         assert!(can_receive(&s, "b", "a"));
         assert!(!can_send(&s, "b", "a"));
+    }
+
+    #[test]
+    fn can_reach_is_direction_agnostic_but_needs_enabled() {
+        let s = snap(
+            vec![term("a", "claude", None), term("b", "claude", None)],
+            vec![edge("a", "b", "source-to-target", true)],
+        );
+        assert!(can_reach(&s, "a", "b"));
+        assert!(can_reach(&s, "b", "a"));
+        let off = snap(
+            vec![term("a", "claude", None), term("b", "claude", None)],
+            vec![edge("a", "b", "source-to-target", false)],
+        );
+        assert!(!can_reach(&off, "a", "b"));
+    }
+
+    #[test]
+    fn resource_access_follows_ownership_and_edges() {
+        // a -> b only: b can receive a's data, a cannot receive b's.
+        let s = snap(
+            vec![term("a", "claude", None), term("b", "claude", None)],
+            vec![edge("a", "b", "source-to-target", true)],
+        );
+        // Owner reads own; anyone reads user-dropped (None).
+        assert!(can_access_resource(&s, "a", Some("a")));
+        assert!(can_access_resource(&s, "b", None));
+        // b may read a's resource (a -> b); a may not read b's.
+        assert!(can_access_resource(&s, "b", Some("a")));
+        assert!(!can_access_resource(&s, "a", Some("b")));
     }
 
     #[test]

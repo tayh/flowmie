@@ -64,6 +64,20 @@ export interface CanvasEdge {
   enabled: boolean;
 }
 
+export type ResourceKind = "image" | "text" | "file";
+
+/** A canvas resource (F002 Phase 3). Mirrors src-tauri/src/resources/mod.rs.
+ * The blob lives on disk at `path`; only this lightweight ref is persisted. */
+export interface ResourceRef {
+  id: string;
+  kind: ResourceKind;
+  mime: string;
+  label: string;
+  ownerNodeId: string | null;
+  createdAt: string;
+  path: string;
+}
+
 export interface Workspace {
   id: string;
   name: string;
@@ -72,6 +86,8 @@ export interface Workspace {
   viewport: Viewport;
   nodes: CanvasNode[];
   edges: CanvasEdge[];
+  // F002 Phase 3; defaults to [] for pre-Phase-3 workspaces.
+  resources: ResourceRef[];
 }
 
 export interface WorkspaceSummary {

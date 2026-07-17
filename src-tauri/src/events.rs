@@ -39,3 +39,12 @@ pub struct SkillMessageEvent {
     #[serde(rename = "messageId")]
     pub message_id: String,
 }
+
+/// Emitted when a resource is registered by an agent skill (`share_resource`,
+/// `capture_webview`) so the frontend can add it to the workspace for
+/// persistence and the resource tray (F002 Phase 3). Carries the full ref so
+/// the frontend needn't round-trip to fetch it.
+#[derive(Clone, Serialize)]
+pub struct ResourceCreatedEvent {
+    pub resource: crate::resources::ResourceRef,
+}

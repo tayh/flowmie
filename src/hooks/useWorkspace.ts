@@ -18,6 +18,8 @@ import type {
   FlowmieRFNode,
   NoteNodeData,
   NoteRFNode,
+  ResourceKind,
+  ResourceRef,
   TerminalNodeData,
   TerminalRFNode,
   Viewport,
@@ -158,12 +160,26 @@ interface WorkspaceState {
   nodes: FlowmieRFNode[];
   edges: FlowmieEdge[];
   viewport: Viewport;
+  resources: ResourceRef[];
   onNodesChange: OnNodesChange<FlowmieRFNode>;
   onEdgesChange: OnEdgesChange<FlowmieEdge>;
   onConnect: (connection: Connection) => void;
   toggleEdge: (edgeId: string) => void;
   toggleEdgeDirection: (edgeId: string) => void;
   setViewport: (viewport: Viewport) => void;
+  // F002 Phase 3 resources.
+  addResource: (resource: ResourceRef) => void;
+  removeResource: (resourceId: string) => void;
+  registerResource: (input: {
+    kind: ResourceKind;
+    mime: string;
+    label: string;
+    ownerNodeId?: string | null;
+    dataBase64?: string;
+    srcPath?: string;
+  }) => Promise<ResourceRef>;
+  captureWebview: (nodeId: string) => Promise<void>;
+  reshareResource: (resourceId: string, toNodeId: string) => Promise<void>;
   addTerminal: (
     agentType: AgentType,
     opts?: { cwd?: string; role?: string; position?: { x: number; y: number } },
@@ -185,6 +201,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   nodes: [],
   edges: [],
   viewport: { x: 0, y: 0, zoom: 1 },
+  resources: [],
 
   onNodesChange: (changes: NodeChange<FlowmieRFNode>[]) => {
     set({ nodes: applyNodeChanges(changes, get().nodes) });
@@ -195,14 +212,19 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   },
 
   onConnect: (connection: Connection) => {
-    // A relay always originates at a terminal; the target may be another
-    // terminal (relay its response as input) or a note (append its output).
+    // Valid wires: terminal→terminal (relay input), terminal→note (append
+    // output), and terminal↔webview (F002 Phase 3 — lets an agent connect to a
+    // Portal so it can capture it). At least one end must be a terminal.
     const nodes = get().nodes;
     const source = nodes.find((n) => n.id === connection.source);
     const target = nodes.find((n) => n.id === connection.target);
-    if (source?.type !== "terminal") return;
-    if (target?.type !== "terminal" && target?.type !== "note") return;
     if (connection.source === connection.target) return;
+    const isTerminal = (n: FlowmieRFNode | undefined) => n?.type === "terminal";
+    const valid =
+      (isTerminal(source) &&
+        (isTerminal(target) || target?.type === "note" || target?.type === "webview")) ||
+      (source?.type === "webview" && isTerminal(target));
+    if (!source || !target || !valid) return;
 
     const edge: FlowmieEdge = {
       id: newId(),
@@ -257,6 +279,57 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   },
 
   setViewport: (viewport) => set({ viewport }),
+
+  // Add a resource to the workspace, deduped by id. Shared by the register/
+  // capture actions and the `resource://created` listener (agent-side shares
+  // arrive only as events), so overlapping adds collapse to one.
+  addResource: (resource) => {
+    if (get().resources.some((r) => r.id === resource.id)) return;
+    set({ resources: [...get().resources, resource] });
+  },
+
+  removeResource: (resourceId) => {
+    set({ resources: get().resources.filter((r) => r.id !== resourceId) });
+  },
+
+  registerResource: async (input) => {
+    const resource = await invoke<ResourceRef>("resource_register", {
+      kind: input.kind,
+      mime: input.mime,
+      label: input.label,
+      ownerNodeId: input.ownerNodeId ?? null,
+      dataBase64: input.dataBase64,
+      srcPath: input.srcPath,
+    });
+    get().addResource(resource);
+    return resource;
+  },
+
+  captureWebview: async (nodeId) => {
+    const node = get().nodes.find((n) => n.id === nodeId);
+    if (node?.type !== "webview" || !node.data.webviewLabel) return;
+    const resource = await invoke<ResourceRef>("webview_capture", {
+      nodeId,
+      webviewLabel: node.data.webviewLabel,
+      label: `screenshot of ${node.data.label}`,
+    });
+    get().addResource(resource);
+  },
+
+  // Re-publish an existing blob under a new owner so that node's agent can
+  // fetch it — the backing content-addressed blob is reused, only a fresh ref
+  // is minted. Backs the drag-a-chip-onto-a-node gesture.
+  reshareResource: async (resourceId, toNodeId) => {
+    const existing = get().resources.find((r) => r.id === resourceId);
+    if (!existing || existing.ownerNodeId === toNodeId) return;
+    await get().registerResource({
+      kind: existing.kind,
+      mime: existing.mime,
+      label: existing.label,
+      ownerNodeId: toNodeId,
+      srcPath: existing.path,
+    });
+  },
 
   addTerminal: async (agentType, opts = {}) => {
     const { cwd = "", role, position } = opts;
@@ -404,6 +477,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       viewport: state.viewport,
       nodes: state.nodes.map(toCanvasNode),
       edges: state.edges.map(toCanvasEdge),
+      resources: state.resources,
     };
     await invoke("workspace_save", { workspace });
   },
@@ -468,6 +542,17 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       }),
     );
 
+    // Re-seed the backend resource store so resources shared last session stay
+    // fetchable by agents (blobs are still on disk at their content paths).
+    const resources = workspace.resources ?? [];
+    if (resources.length > 0) {
+      try {
+        await invoke("resources_sync", { resources });
+      } catch {
+        // Non-fatal: resources just won't be agent-fetchable until re-shared.
+      }
+    }
+
     set({
       workspaceId: workspace.id,
       name: workspace.name,
@@ -475,6 +560,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       viewport: workspace.viewport,
       nodes,
       edges: workspace.edges.map(fromCanvasEdge),
+      resources,
     });
   },
 

@@ -139,6 +139,127 @@ const TOOLS = [
         `&timeoutMs=${Number(args?.timeoutMs) > 0 ? Math.floor(args.timeoutMs) : 60000}`,
     }),
   },
+  {
+    name: "list_resources",
+    description:
+      "List the resources you can access on the canvas: images and files a " +
+      "connected peer published, screenshots you captured, and the text of any " +
+      "note wired to you. Each entry has a resourceId you pass to get_resource. " +
+      "Pass nodeId to see only that node's resources.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        nodeId: { type: "string", description: "Only resources owned by this node." },
+      },
+      additionalProperties: false,
+    },
+    request: (args) => ({
+      method: "GET",
+      path:
+        `/resources?node=${node()}` +
+        (args?.nodeId ? `&owner=${encodeURIComponent(args.nodeId)}` : ""),
+    }),
+  },
+  {
+    name: "get_resource",
+    description:
+      "Fetch a resource into your context by its resourceId (from " +
+      "list_resources). as='path' (default) writes it to a local file and " +
+      "returns the path — best for large or binary blobs a CLI reads by path. " +
+      "as='inline' returns text directly, or image data you can view if your " +
+      "client renders images. Fails if you are not connected to the owner.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        resourceId: { type: "string", description: "The resource's id." },
+        as: {
+          type: "string",
+          enum: ["path", "inline"],
+          description: "How to materialize it (default 'path').",
+        },
+      },
+      required: ["resourceId"],
+      additionalProperties: false,
+    },
+    request: (args) => ({
+      method: "GET",
+      path:
+        `/resource?node=${node()}` +
+        `&id=${encodeURIComponent(args?.resourceId ?? "")}` +
+        `&as=${args?.as === "inline" ? "inline" : "path"}`,
+    }),
+    // Turn an inline-image bridge result into a proper MCP image content block
+    // so a vision-capable client renders it; everything else stays text.
+    transform: (body) => {
+      try {
+        const parsed = JSON.parse(body);
+        if (parsed && parsed.inlineImage) {
+          return [
+            {
+              type: "image",
+              data: parsed.inlineImage.dataBase64,
+              mimeType: parsed.inlineImage.mime,
+            },
+          ];
+        }
+      } catch {
+        // fall through to text
+      }
+      return [{ type: "text", text: body }];
+    },
+  },
+  {
+    name: "share_resource",
+    description:
+      "Publish a resource (an image, text, or file) onto the canvas so peers " +
+      "connected to you can fetch it with get_resource. Provide the bytes as " +
+      "base64 (dataBase64) or point at an existing file (path). Returns the " +
+      "resourceId others will use.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["image", "text", "file"], description: "Resource kind." },
+        mime: { type: "string", description: "MIME type, e.g. image/png, text/markdown." },
+        label: { type: "string", description: "A human/agent-readable name." },
+        dataBase64: { type: "string", description: "The resource bytes, base64-encoded." },
+        path: { type: "string", description: "Alternatively, a path to an existing file." },
+      },
+      required: ["kind", "mime", "label"],
+      additionalProperties: false,
+    },
+    request: (args) => ({
+      method: "POST",
+      path: `/resource/share?node=${node()}`,
+      body: {
+        kind: args?.kind,
+        mime: args?.mime,
+        label: args?.label,
+        dataBase64: args?.dataBase64,
+        path: args?.path,
+      },
+    }),
+  },
+  {
+    name: "capture_webview",
+    description:
+      "Screenshot a connected webview (Portal) node and register it as an image " +
+      "resource — this is how you 'get an image' of a running web page on the " +
+      "canvas. Pass the webview node's id. Returns a resourceId (and path) you " +
+      "then read with get_resource. Requires an enabled edge to that webview.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        nodeId: { type: "string", description: "The webview node's id." },
+      },
+      required: ["nodeId"],
+      additionalProperties: false,
+    },
+    request: (args) => ({
+      method: "POST",
+      path: `/capture?node=${node()}`,
+      body: { nodeId: args?.nodeId },
+    }),
+  },
 ];
 
 const TOOLS_BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
@@ -188,7 +309,10 @@ async function handleToolCall(id, params) {
   }
   try {
     const body = await callBridge(tool.request(params.arguments ?? {}));
-    reply(id, { content: [{ type: "text", text: body }] });
+    const content = tool.transform
+      ? tool.transform(body)
+      : [{ type: "text", text: body }];
+    reply(id, { content });
   } catch (err) {
     // Surface as a tool error the agent can read and react to, not a
     // protocol-level failure.

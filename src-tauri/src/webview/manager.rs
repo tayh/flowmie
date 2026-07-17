@@ -74,3 +74,10 @@ pub fn destroy(app: &AppHandle, label: &str) -> Result<(), String> {
     };
     webview.close().map_err(|e| e.to_string())
 }
+
+/// Screenshot a webview to PNG bytes (F002 Phase 3 `capture_webview`). Only the
+/// Linux path (the bespoke wry+gtk overlay) is implemented; the Tauri
+/// `add_child` webviews used elsewhere have no synchronous snapshot API here.
+pub fn capture(_app: &AppHandle, _label: &str) -> Result<Vec<u8>, String> {
+    Err("webview capture is only implemented on Linux".to_string())
+}

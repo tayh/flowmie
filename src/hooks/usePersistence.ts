@@ -29,11 +29,12 @@ export function usePersistence() {
 
     const unsubscribe = useWorkspace.subscribe((state, prev) => {
       if (!initializedRef.current) return;
-      // Only persist structural/content/viewport changes.
+      // Only persist structural/content/viewport/resource changes.
       if (
         state.nodes === prev.nodes &&
         state.edges === prev.edges &&
-        state.viewport === prev.viewport
+        state.viewport === prev.viewport &&
+        state.resources === prev.resources
       ) {
         return;
       }

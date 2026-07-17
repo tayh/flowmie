@@ -1024,16 +1024,20 @@ dependencies = [
 name = "flowmie"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "cairo-rs",
  "dirs 5.0.1",
  "gtk",
  "portable-pty",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
  "tiny_http",
  "uuid",
+ "webkit2gtk",
  "wry",
 ]
 

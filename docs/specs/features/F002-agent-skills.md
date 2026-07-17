@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | ID | F002 |
-| Status | planned |
+| Status | done |
 | Milestone | v0.2 |
 | Depends on | [F001](https://github.com/tayh/flowmie/blob/main/docs/specs/features/F001-agent-orchestration-canvas.md) |
 
@@ -236,11 +236,22 @@ A message is **not** persisted state — it is an ephemeral delivery. `send_mess
 
 **Acceptance criteria:**
 
-- [ ] An agent calls `capture_webview` on a connected ChatGPT/Gemini Portal and then `get_resource` to read the PNG (by path or inline image content)
-- [ ] `share_resource` from agent A produces a `resourceId` that connected agent B can `get_resource`; an unconnected agent cannot
-- [ ] Closing and reopening the app restores `ResourceRef`s and their blobs remain readable
+- [~] An agent calls `capture_webview` on a connected ChatGPT/Gemini Portal and then `get_resource` to read the PNG (by path or inline image content) — *plumbing built and unit/e2e-verified; the actual on-screen screenshot needs a live GTK display (manual check in `tauri dev`)*
+- [x] `share_resource` from agent A produces a `resourceId` that connected agent B can `get_resource`; an unconnected agent cannot
+- [x] Closing and reopening the app restores `ResourceRef`s and their blobs remain readable
 
 **Known technical risks:**
 
 - Inline image content is only useful to agents whose CLI renders MCP image results; default to `as: "path"` and let vision-capable agents request `inline`.
 - Webview capture on Linux uses the bespoke `wry`+`gtk` overlay path from F001 Phase 3, not Tauri's `add_child`; the capture surface must target that overlay's actual widget.
+
+**Implementation notes (as built):**
+
+- **Resource store (`src-tauri/src/resources/mod.rs`):** a Tauri-managed `ResourceStore` writes blobs content-addressed as `~/.flowmie/resources/<sha256>.<ext>` (identical bytes dedupe to one blob; each `register` still mints a fresh `ResourceRef`). `read(id, as)` returns a `{path}` (default, and always for binary/oversized), inline `{content}` for text, or `{inlineImage:{dataBase64,mime}}` for images. Timestamps use a dependency-free `iso8601_now` (Howard-Hinnant civil-from-days). Unit-tested (content-addressing, read variants, idempotent seed, ISO shape, and a **restart round-trip** covering criterion 3).
+- **Permission model:** reuses the F002 edge rule. `can_access_resource(caller, owner)` = own it, or it's user-dropped (`owner=None`), or an enabled edge lets `owner → caller` (same direction as a peer's reply). Webview capture uses `can_reach` (any enabled edge touching both, direction-agnostic — a Portal is passive). Pure + unit-tested in `skills/mod.rs`.
+- **Backend authority + events:** the store is the source of truth. Agent-driven `share_resource`/`capture_webview` register with **no frontend round-trip** and emit `resource://created`; the frontend (`useResources`) folds the ref into the workspace for persistence and the tray. On load, `resources_sync` re-seeds the store from the persisted refs so last session's resources stay fetchable (blobs are still on disk).
+- **Bridge routes (`skills/bridge.rs`):** `GET /resources` (accessible refs + connected notes as synthetic `note:<id>` text resources), `GET /resource` (permission-checked `read`; `note:<id>` returns live note text), `POST /resource/share`, `POST /capture`. `/capture` runs on its own thread (the WebKit snapshot blocks).
+- **Webview capture:** `webview/manager_linux.rs::capture` calls WebKit's async `WebViewExt::snapshot(Visible, NONE, …)` on the GTK main thread; the completion callback ships the `cairo::Surface` back over a channel the off-main caller blocks on, then it's encoded to PNG (`ImageSurface::write_to_png`). Chosen over `gdk_pixbuf_get_from_window`, which can return blank pixels for GL-composited WebKit surfaces. Pins `webkit2gtk = "=2.0.2"` (features `v2_38`) to match wry 0.55 so the `WebView` types unify, and enables `cairo-rs`'s `png` feature.
+- **MCP shim:** four new tools — `list_resources`, `get_resource`, `share_resource`, `capture_webview`. `get_resource` translates an `inlineImage` bridge result into an MCP `{type:"image"}` content block so vision-capable clients render it; other results stay text.
+- **UX (full tray, §7):** `ResourceTray` chips on the owning terminal/note node (webview chips render inline in its titlebar, since the native overlay covers the body); a 📷 capture button on running Portals; OS file-drop on the canvas creates a user-owned (`ownerNodeId=null`) resource; and **drag a chip onto another node** re-shares it (`reshareResource` mints a new ref owned by the target from the same content blob, so that node's agent can `get_resource` it). Chips click-to-open the blob via `opener` (needs `opener:allow-open-path`). Terminal↔webview edges are now allowed (with handles on webview nodes) so an agent can wire to a Portal to capture it; webviews/notes are included in the topology snapshot.
+- **Verified:** `cargo test` (27 unit tests, incl. resource store + permissions + restart round-trip), `tsc` + `vitest` (24) green, production `vite build` clean, and an extended MCP e2e harness driving the **real shim** against a stub bridge — `tools/list` advertises the four tools; `share_resource` forwards body/token/node and returns the id; `get_resource` inline image becomes an MCP image block; a 403 surfaces as a tool error; `capture_webview` POSTs the webview id. **Remaining manual check:** the actual on-screen screenshot from `capture_webview` on a real ChatGPT/Gemini Portal, which needs a live GTK display (`npm run tauri dev`).

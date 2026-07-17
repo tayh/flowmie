@@ -14,10 +14,13 @@ use tauri::{AppHandle, Emitter, Manager};
 use tiny_http::{Header, Method, Request, Response, Server};
 
 use super::{
-    agents_for, can_receive, can_send, connections_for, sanitize_message, whoami, Snapshot,
+    agents_for, can_access_resource, can_reach, can_receive, can_send, connections_for,
+    sanitize_message, whoami, NoteInfo, Snapshot,
 };
-use crate::events::SkillMessageEvent;
+use crate::commands::capture_webview_resource;
+use crate::events::{ResourceCreatedEvent, SkillMessageEvent};
 use crate::pty::manager::PtyManager;
+use crate::resources::{decode_base64, ResourceRef, ResourceStore};
 
 /// One directed message an agent explicitly sent to another via `send_message`,
 /// tagged with a monotonic sequence number. `wait_for_reply` scans this log for
@@ -123,6 +126,38 @@ struct MessageBody {
 #[derive(Deserialize)]
 struct ReplyBody {
     text: String,
+}
+
+#[derive(Deserialize)]
+struct ShareBody {
+    kind: String,
+    mime: String,
+    label: String,
+    #[serde(rename = "dataBase64", default)]
+    data_base64: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CaptureBody {
+    #[serde(rename = "nodeId")]
+    node_id: String,
+}
+
+/// Build the synthetic text `ResourceRef` a connected note is surfaced as. Its
+/// id is `note:<noteId>`; it has no on-disk blob — `get_resource` returns the
+/// note's live text inline.
+fn note_resource(note: &NoteInfo) -> ResourceRef {
+    ResourceRef {
+        id: format!("note:{}", note.id),
+        kind: "text".to_string(),
+        mime: "text/markdown".to_string(),
+        label: "note".to_string(),
+        owner_node_id: note.connected_terminal_id.clone(),
+        created_at: String::new(),
+        path: String::new(),
+    }
 }
 
 fn json_response(status: u16, body: String) -> Response<std::io::Cursor<Vec<u8>>> {
@@ -349,6 +384,137 @@ fn handle_reply(
     }
 }
 
+/// `list_resources`: refs the caller may access (owned + reachable by an
+/// enabled edge) plus connected notes surfaced as synthetic text resources.
+/// An optional `owner` narrows to one node's resources.
+fn handle_list_resources(h: &Handlers, caller: &str, owner: Option<&str>) -> (u16, String) {
+    let store = h.app.state::<ResourceStore>();
+    let snap = h.snapshot.lock().unwrap();
+    let mut refs: Vec<ResourceRef> = store
+        .all()
+        .into_iter()
+        .filter(|r| can_access_resource(&snap, caller, r.owner_node_id.as_deref()))
+        .filter(|r| owner.is_none_or(|o| r.owner_node_id.as_deref() == Some(o)))
+        .collect();
+    // A note is offered to the terminal it is wired to (F002 §4 list_resources).
+    for note in &snap.notes {
+        if note.connected_terminal_id.as_deref() == Some(caller)
+            && owner.is_none_or(|o| o == note.id)
+        {
+            refs.push(note_resource(note));
+        }
+    }
+    (200, serde_json::to_string(&refs).unwrap())
+}
+
+/// `get_resource`: materialize a resource the caller may access. A `note:<id>`
+/// id returns the note's live text; otherwise the on-disk blob (path/inline).
+fn handle_get_resource(h: &Handlers, caller: &str, id: &str, as_: &str) -> (u16, String) {
+    if let Some(note_id) = id.strip_prefix("note:") {
+        let snap = h.snapshot.lock().unwrap();
+        return match snap.notes.iter().find(|n| n.id == note_id) {
+            Some(n) if n.connected_terminal_id.as_deref() == Some(caller) => {
+                (200, serde_json::json!({ "content": n.content }).to_string())
+            }
+            Some(_) => (
+                403,
+                "{\"error\":\"not connected: that note is not wired to you\"}".into(),
+            ),
+            None => (404, "{\"error\":\"unknown note\"}".into()),
+        };
+    }
+
+    let store = h.app.state::<ResourceStore>();
+    let Some(resource) = store.get(id) else {
+        return (404, "{\"error\":\"unknown resource\"}".into());
+    };
+    {
+        let snap = h.snapshot.lock().unwrap();
+        if !can_access_resource(&snap, caller, resource.owner_node_id.as_deref()) {
+            return (
+                403,
+                "{\"error\":\"not connected: you cannot access that resource\"}".into(),
+            );
+        }
+    }
+    match store.read(id, as_) {
+        Ok(result) => (200, serde_json::to_string(&result).unwrap()),
+        Err(e) => (500, format!("{{\"error\":\"{e}\"}}")),
+    }
+}
+
+/// `share_resource`: publish a blob owned by the caller so connected peers can
+/// fetch it. Emits `resource://created` so the canvas records it.
+fn handle_share_resource(h: &Handlers, caller: &str, body: &str) -> (u16, String) {
+    let parsed: ShareBody = match serde_json::from_str(body) {
+        Ok(b) => b,
+        Err(e) => return (400, format!("{{\"error\":\"bad body: {e}\"}}")),
+    };
+    let store = h.app.state::<ResourceStore>();
+    let owner = Some(caller.to_string());
+    let result = match (parsed.data_base64, parsed.path) {
+        (Some(data), _) => match decode_base64(&data) {
+            Ok(bytes) => store.register_bytes(&parsed.kind, &parsed.mime, &parsed.label, owner, &bytes),
+            Err(e) => Err(e),
+        },
+        (None, Some(path)) => {
+            store.register_from_path(&parsed.kind, &parsed.mime, &parsed.label, owner, &path)
+        }
+        (None, None) => Err("share_resource needs dataBase64 or path".to_string()),
+    };
+    match result {
+        Ok(resource) => {
+            let _ = h.app.emit(
+                "resource://created",
+                ResourceCreatedEvent {
+                    resource: resource.clone(),
+                },
+            );
+            (200, format!("{{\"resourceId\":\"{}\"}}", resource.id))
+        }
+        Err(e) => (400, format!("{{\"error\":\"{e}\"}}")),
+    }
+}
+
+/// `capture_webview`: screenshot a connected Portal into an image resource owned
+/// by the caller. Blocks on the async WebKit snapshot, so the route dispatch
+/// runs it on its own thread.
+fn handle_capture(h: &Handlers, caller: &str, body: &str) -> (u16, String) {
+    let parsed: CaptureBody = match serde_json::from_str(body) {
+        Ok(b) => b,
+        Err(e) => return (400, format!("{{\"error\":\"bad body: {e}\"}}")),
+    };
+    let webview_label = {
+        let snap = h.snapshot.lock().unwrap();
+        if !can_reach(&snap, caller, &parsed.node_id) {
+            return (
+                403,
+                "{\"error\":\"not connected: draw an edge to that webview to capture it\"}".into(),
+            );
+        }
+        match snap.webviews.iter().find(|w| w.id == parsed.node_id) {
+            Some(w) => match &w.webview_label {
+                Some(l) => l.clone(),
+                None => return (409, "{\"error\":\"that webview is not running\"}".into()),
+            },
+            None => return (404, "{\"error\":\"unknown webview\"}".into()),
+        }
+    };
+    let label = format!("screenshot of {}", parsed.node_id);
+    let store = h.app.state::<ResourceStore>();
+    match capture_webview_resource(&h.app, &store, &webview_label, Some(caller.to_string()), &label) {
+        Ok(resource) => (
+            200,
+            format!(
+                "{{\"resourceId\":\"{}\",\"path\":{}}}",
+                resource.id,
+                serde_json::to_string(&resource.path).unwrap()
+            ),
+        ),
+        Err(e) => (500, format!("{{\"error\":\"{e}\"}}")),
+    }
+}
+
 fn respond(request: Request, status: u16, body: String) {
     let _ = request.respond(json_response(status, body));
 }
@@ -446,6 +612,39 @@ pub fn start(app: &AppHandle) -> Result<(), String> {
                         respond(request, s, b);
                     });
                 }
+                (Method::Get, "/resources") => {
+                    let owner = query_get(&pairs, "owner").map(|s| s.to_string());
+                    let (s, b) = handle_list_resources(&handlers, &node, owner.as_deref());
+                    respond(request, s, b);
+                }
+                (Method::Get, "/resource") => {
+                    let id = query_get(&pairs, "id").unwrap_or("").to_string();
+                    let as_ = query_get(&pairs, "as").unwrap_or("path").to_string();
+                    let (s, b) = handle_get_resource(&handlers, &node, &id, &as_);
+                    respond(request, s, b);
+                }
+                (Method::Post, "/resource/share") => {
+                    let mut body = String::new();
+                    if request.as_reader().read_to_string(&mut body).is_err() {
+                        respond(request, 400, "{\"error\":\"unreadable body\"}".into());
+                        continue;
+                    }
+                    let (s, b) = handle_share_resource(&handlers, &node, &body);
+                    respond(request, s, b);
+                }
+                (Method::Post, "/capture") => {
+                    // The WebKit snapshot blocks; run it off the server loop.
+                    let mut body = String::new();
+                    if request.as_reader().read_to_string(&mut body).is_err() {
+                        respond(request, 400, "{\"error\":\"unreadable body\"}".into());
+                        continue;
+                    }
+                    let h = handlers.clone();
+                    std::thread::spawn(move || {
+                        let (s, b) = handle_capture(&h, &node, &body);
+                        respond(request, s, b);
+                    });
+                }
                 _ => respond(request, 404, "{\"error\":\"not found\"}".into()),
             }
         }
@@ -477,7 +676,11 @@ mod tests {
             },
         ];
         (
-            Arc::new(Mutex::new(Snapshot { terminals, edges })),
+            Arc::new(Mutex::new(Snapshot {
+                terminals,
+                edges,
+                ..Default::default()
+            })),
             Arc::new(Mutex::new(Vec::new())),
             Arc::new(AtomicU64::new(0)),
         )

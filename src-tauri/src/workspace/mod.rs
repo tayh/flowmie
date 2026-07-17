@@ -2,6 +2,8 @@ pub mod persistence;
 
 use serde::{Deserialize, Serialize};
 
+use crate::resources::ResourceRef;
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Viewport {
     pub x: f64,
@@ -87,6 +89,9 @@ pub struct Workspace {
     pub viewport: Viewport,
     pub nodes: Vec<CanvasNode>,
     pub edges: Vec<CanvasEdge>,
+    /// F002 Phase 3; `#[serde(default)]` so pre-Phase-3 files deserialize.
+    #[serde(default)]
+    pub resources: Vec<ResourceRef>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

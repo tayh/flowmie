@@ -29,7 +29,19 @@ function buildSnapshot(nodes: FlowmieRFNode[], edges: FlowmieEdge[]) {
     direction: e.data?.direction ?? "source-to-target",
     enabled: e.data?.enabled ?? true,
   }));
-  return { terminals, edges: bridgeEdges };
+  // Webviews (for capture_webview to resolve a Portal) and notes (surfaced as
+  // text resources) also matter to the resource skills (F002 Phase 3).
+  const webviews = nodes
+    .filter((n): n is Extract<FlowmieRFNode, { type: "webview" }> => n.type === "webview")
+    .map((n) => ({ id: n.id, webviewLabel: n.data.webviewLabel, label: n.data.label }));
+  const notes = nodes
+    .filter((n): n is Extract<FlowmieRFNode, { type: "note" }> => n.type === "note")
+    .map((n) => ({
+      id: n.id,
+      content: n.data.content,
+      connectedTerminalId: n.data.connectedTerminalId,
+    }));
+  return { terminals, edges: bridgeEdges, webviews, notes };
 }
 
 export function useSkillsSync() {

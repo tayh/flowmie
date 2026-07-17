@@ -18,4 +18,4 @@ A desktop agent orchestration canvas for organizing coding terminals, embedded w
 | ID | Feature | Milestone | Status |
 |---|---|---|---|
 | [F001](https://github.com/tayh/flowmie/blob/main/docs/specs/features/F001-agent-orchestration-canvas.md) | Agent Orchestration Canvas | MVP | done |
-| [F002](https://github.com/tayh/flowmie/blob/main/docs/specs/features/F002-agent-skills.md) | Agent Skills (Canvas-Aware Collaboration) | v0.2 | planned |
+| [F002](https://github.com/tayh/flowmie/blob/main/docs/specs/features/F002-agent-skills.md) | Agent Skills (Canvas-Aware Collaboration) | v0.2 | done |

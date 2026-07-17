@@ -1,0 +1,71 @@
+.resource-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 6px;
+  background-color: #232323;
+  border-top: 1px solid #333;
+  max-height: 64px;
+  overflow-y: auto;
+}
+
+.resource-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 160px;
+  padding: 2px 4px 2px 6px;
+  background-color: #333;
+  border: 1px solid #454545;
+  border-radius: 10px;
+  color: #d6d6d6;
+  font-size: 11px;
+  cursor: grab;
+  user-select: none;
+}
+
+.resource-chip:hover {
+  background-color: #3d3d3d;
+  border-color: #565656;
+}
+
+.resource-chip__icon {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.resource-chip__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resource-chip__remove {
+  background: none;
+  border: none;
+  color: #999;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0 2px;
+  border-radius: 4px;
+}
+
+.resource-chip__remove:hover {
+  color: #fff;
+  background-color: #555;
+}
+
+/* Compact variant for the webview titlebar, where vertical room is tight and
+   the native overlay hides everything below the bar. */
+.resource-tray--inline {
+  padding: 0;
+  background: none;
+  border-top: none;
+  max-height: none;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex: 1;
+  margin: 0 6px;
+}
