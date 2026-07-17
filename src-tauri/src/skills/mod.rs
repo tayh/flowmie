@@ -40,6 +40,47 @@ pub fn shim_path() -> String {
     path.to_string_lossy().into_owned()
 }
 
+/// What a skills-enabled agent is told about its situation at spawn, appended
+/// to its system prompt so it costs no turn and never appears in the terminal.
+///
+/// Deliberately does **not** list the agent's peers: the canvas is live, and a
+/// roster baked in here would be wrong the moment a wire is drawn or cut. It
+/// says *that* peers may exist and how to look them up, so the agent's picture
+/// is always fetched fresh rather than remembered stale.
+///
+/// This describes the agent's *situation*; the MCP server's `instructions`
+/// (mcp-server/flowmie-mcp.mjs) describes the *tools*. They overlap on purpose
+/// — an agent whose client drops one still gets the other — so keep them
+/// consistent when editing either.
+pub fn canvas_preamble(node_id: &str, role: Option<&str>) -> String {
+    let mut s = String::from(
+        "You are running inside Flowmie, as a terminal node on the user's canvas. \
+         You are not alone: the canvas may hold other agents, notes, embedded browsers \
+         (Portals), and files, and the user wires nodes together with edges.\n\n\
+         An edge is a permission. You can see, message, and read from another node only \
+         if an enabled edge connects you to it — so if something is not wired to you, it \
+         is not available to you, and that is intentional rather than an error.\n\n\
+         You have Flowmie skills available as tools (named `mcp__flowmie__*` if your \
+         client prefixes them). Use them on your own initiative:\n\
+         - `whoami` — your own identity on the canvas.\n\
+         - `list_agents` / `get_connections` — who is wired to you, right now. The canvas \
+         changes while you run, so call these when it matters rather than assuming.\n\
+         - `send_message` / `reply` / `wait_for_reply` — talk to a connected peer. Use \
+         `reply` to answer whoever just messaged you; it needs no node id.\n\
+         - `list_resources` / `get_resource` — read what is wired to you: a note's text, a \
+         file or folder pinned to the canvas, an image a peer shared.\n\
+         - `capture_webview` / `share_resource` — screenshot a connected Portal; publish \
+         something for connected peers to fetch.\n\n\
+         If a peer messages you, answering is expected — you are part of a workspace, not \
+         a solo session.\n",
+    );
+    s.push_str(&format!("\nYour node id is {node_id}."));
+    if let Some(role) = role.map(str::trim).filter(|r| !r.is_empty()) {
+        s.push_str(&format!(" Your role on this canvas: {role}"));
+    }
+    s
+}
+
 /// Write the per-node MCP config Claude Code will load with `--mcp-config`.
 /// The node id, bridge URL, and token are baked into the server's `env` so
 /// the shim knows which node is asking without relying on env inheritance.
@@ -467,6 +508,33 @@ mod tests {
         // b may read a's resource (a -> b); a may not read b's.
         assert!(can_access_resource(&s, "b", Some("a")));
         assert!(!can_access_resource(&s, "a", Some("b")));
+    }
+
+    #[test]
+    fn canvas_preamble_states_identity_and_how_to_look_around() {
+        let p = canvas_preamble("node-1", Some("Code Reviewer"));
+        assert!(p.contains("Flowmie"));
+        assert!(p.contains("node-1"));
+        assert!(p.contains("Code Reviewer"));
+        // The two load-bearing facts: peers exist, and the edge is the grant.
+        assert!(p.contains("list_agents"));
+        assert!(p.contains("An edge is a permission"));
+    }
+
+    #[test]
+    fn canvas_preamble_bakes_in_no_peer_roster() {
+        // A roster would be stale the moment a wire changes; the agent is told
+        // to look instead. Guards against someone "helpfully" adding one.
+        let p = canvas_preamble("node-1", None);
+        assert!(p.contains("call these when it matters"));
+        assert!(!p.contains("Connected peers"));
+    }
+
+    #[test]
+    fn canvas_preamble_omits_an_absent_or_blank_role() {
+        assert!(!canvas_preamble("node-1", None).contains("Your role"));
+        // A role of whitespace is no role — don't emit a dangling label.
+        assert!(!canvas_preamble("node-1", Some("   ")).contains("Your role"));
     }
 
     #[test]

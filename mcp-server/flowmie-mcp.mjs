@@ -21,6 +21,35 @@ const TOKEN = process.env.FLOWMIE_BRIDGE_TOKEN ?? "";
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_INFO = { name: "flowmie", version: "0.1.0" };
 
+// Returned from `initialize`; MCP clients surface this to the model as context
+// for the server. This is how an agent learns it is on a canvas at all, rather
+// than having to infer it from a list of oddly-named tools.
+//
+// It describes the *server and its tools*. The spawner separately appends a
+// preamble describing the agent's *situation* (see `canvas_preamble` in
+// src-tauri/src/skills/mod.rs) — the overlap is deliberate, so an agent whose
+// client ignores one still gets the other. Keep the two consistent.
+//
+// Deliberately no peer roster: the canvas is live, so the agent is told how to
+// look rather than handed a list that goes stale the moment a wire changes.
+const INSTRUCTIONS = [
+  "Flowmie is the canvas this agent is running on. The user arranges agents,",
+  "notes, embedded browsers (Portals), and files as nodes, and wires them",
+  "together with edges.",
+  "",
+  "An edge is a permission. These tools only reach a node that an enabled edge",
+  "connects to this agent, respecting its direction. A 'not connected' error is",
+  "the canvas working as intended, not a bug to route around — if something is",
+  "needed but unreachable, say so; the user can draw the wire.",
+  "",
+  "The canvas changes while the agent runs, so treat every answer as a snapshot:",
+  "call list_agents / get_connections when the topology matters rather than",
+  "relying on a memory of it.",
+  NODE_ID ? `\nThis agent is node ${NODE_ID}.` : "",
+]
+  .join("\n")
+  .trim();
+
 const node = () => encodeURIComponent(NODE_ID);
 
 const TOOLS = [
@@ -335,6 +364,7 @@ async function handleMessage(msg) {
         protocolVersion: params?.protocolVersion ?? PROTOCOL_VERSION,
         capabilities: { tools: {} },
         serverInfo: SERVER_INFO,
+        instructions: INSTRUCTIONS,
       });
       return;
     case "notifications/initialized":

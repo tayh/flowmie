@@ -55,6 +55,13 @@ fn command_for_agent(
                 cmd.arg(path.to_string_lossy().to_string());
                 cmd.arg("--strict-mcp-config");
             }
+            // Tell it where it is. Appending to the system prompt (rather than
+            // seeding a first message) means canvas awareness costs no turn and
+            // never shows up in the terminal — the agent just knows.
+            if let Some(s) = skills {
+                cmd.arg("--append-system-prompt");
+                cmd.arg(skills::canvas_preamble(&s.node_id, role));
+            }
             // Claude Code takes an initial prompt as a positional arg, so the
             // role can be seeded directly at launch — no stdin timing race.
             if let Some(instruction) = role {
@@ -326,8 +333,64 @@ impl PtyManager {
 
 #[cfg(test)]
 mod tests {
-    use super::{codex_skills_args, submission_payload, toml_string};
+    use super::{codex_skills_args, command_for_agent, submission_payload, toml_string};
     use crate::skills::SkillsSpawn;
+
+    fn spawn() -> SkillsSpawn {
+        SkillsSpawn {
+            node_id: "node-1".into(),
+            bridge_url: "http://127.0.0.1:9999".into(),
+            token: "tok-abc".into(),
+        }
+    }
+
+    /// The launch argv as plain strings, for asserting on flags.
+    fn argv(cmd: &portable_pty::CommandBuilder) -> Vec<String> {
+        cmd.get_argv()
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn skills_enabled_claude_is_told_it_is_on_the_canvas() {
+        let (cmd, _) = command_for_agent("claude", None, Some(&spawn()));
+        let args = argv(&cmd);
+        let i = args
+            .iter()
+            .position(|a| a == "--append-system-prompt")
+            .expect("claude should be given canvas awareness");
+        // The preamble is the flag's value, and carries this node's identity.
+        assert!(args[i + 1].contains("Flowmie"));
+        assert!(args[i + 1].contains("node-1"));
+    }
+
+    #[test]
+    fn the_preamble_carries_the_role_without_consuming_it() {
+        // The role is still the initial prompt (role_as_arg = true); the
+        // preamble mentioning it must not replace that.
+        let (cmd, role_as_arg) = command_for_agent("claude", Some("Bug Whisperer"), Some(&spawn()));
+        assert!(role_as_arg);
+        let args = argv(&cmd);
+        let i = args.iter().position(|a| a == "--append-system-prompt").unwrap();
+        assert!(args[i + 1].contains("Bug Whisperer"));
+        // ...and the role survives as the trailing positional prompt.
+        assert_eq!(args.last().unwrap(), "Bug Whisperer");
+    }
+
+    #[test]
+    fn skills_disabled_claude_gets_no_preamble() {
+        let (cmd, _) = command_for_agent("claude", None, None);
+        assert!(!argv(&cmd).iter().any(|a| a == "--append-system-prompt"));
+    }
+
+    #[test]
+    fn a_shell_is_not_an_agent_and_is_left_alone() {
+        // A shell has no skills and no system prompt to append to; passing it
+        // agent flags would just break the launch.
+        let (cmd, _) = command_for_agent("shell", None, None);
+        assert!(!argv(&cmd).iter().any(|a| a.starts_with("--append")));
+    }
 
     #[test]
     fn toml_string_escapes_quotes_and_backslashes() {

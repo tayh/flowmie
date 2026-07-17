@@ -53,10 +53,27 @@ In all cases the backend:
 1. Starts (or reuses) the local MCP server.
 2. Spawns the PTY with `FLOWMIE_NODE_ID=<terminal node id>` in its environment.
 3. Points the agent's MCP config at the server.
+4. Tells the agent it is on a canvas at all (see §3.1) — otherwise it has the
+   tools but no reason to believe they matter.
 
 When the agent later calls a skill, the server reads `FLOWMIE_NODE_ID` from the originating session to know **which node is asking**, then answers using live workspace state.
 
 A per-terminal **Skills** toggle (default on for agent types, off for `shell`) controls whether the MCP config is injected at all — the escape hatch, mirroring F001's per-edge relay toggle.
+
+### 3.1 Canvas awareness (spawn-time)
+
+Wiring the tools up is not the same as the agent *knowing where it is*. An agent handed `mcp__flowmie__*` tools and nothing else has to infer its situation from a list of oddly-named functions, and mostly won't — it behaves like a solo session that happens to have some unusual tools. Every skills-enabled agent is therefore told, at spawn, that it is a node on a canvas, that peers may be wired to it, and that **an edge is a permission**.
+
+Delivered through two channels, deliberately overlapping so an agent whose client honours only one still gets the message:
+
+| Channel | Reaches | Carries |
+|---|---|---|
+| MCP `instructions` in the shim's `initialize` reply | Any MCP client — the only lever that reaches `codex`, which has no system-prompt flag | What the *server* is: the canvas, the edge-as-permission rule, "the topology is live, re-check it" |
+| `claude --append-system-prompt <preamble>` | `claude` only, but guaranteed | The agent's *situation*: its node id, its role, the skills it has, that answering a peer is expected |
+
+Both cost **no turn** and leave no trace in the terminal — the agent simply starts out knowing. A seeded first message was rejected for the opposite reasons: it burns a turn, the agent tends to answer it conversationally ("Got it!"), and it collides with the role prompt that already occupies Claude's positional argument.
+
+**Neither channel names the agent's peers.** A roster baked in at spawn is wrong the moment a wire is drawn or cut, and an agent cannot tell a stale roster from a current one. Both channels instead say that peers may exist and to call `list_agents` / `get_connections` when it matters — the roster is always fetched live. This is the same reasoning that makes the bridge answer from the frontend's pushed snapshot rather than a cache of its own.
 
 ---
 
@@ -255,3 +272,25 @@ A message is **not** persisted state — it is an ephemeral delivery. `send_mess
 - **MCP shim:** four new tools — `list_resources`, `get_resource`, `share_resource`, `capture_webview`. `get_resource` translates an `inlineImage` bridge result into an MCP `{type:"image"}` content block so vision-capable clients render it; other results stay text.
 - **UX (full tray, §7):** `ResourceTray` chips on the owning terminal/note node (webview chips render inline in its titlebar, since the native overlay covers the body); a 📷 capture button on running Portals; OS file-drop on the canvas creates a user-owned (`ownerNodeId=null`) resource; and **drag a chip onto another node** re-shares it (`reshareResource` mints a new ref owned by the target from the same content blob, so that node's agent can `get_resource` it). Chips click-to-open the blob via `opener` (needs `opener:allow-open-path`). Terminal↔webview edges are now allowed (with handles on webview nodes) so an agent can wire to a Portal to capture it; webviews/notes are included in the topology snapshot.
 - **Verified:** `cargo test` (27 unit tests, incl. resource store + permissions + restart round-trip), `tsc` + `vitest` (24) green, production `vite build` clean, and an extended MCP e2e harness driving the **real shim** against a stub bridge — `tools/list` advertises the four tools; `share_resource` forwards body/token/node and returns the id; `get_resource` inline image becomes an MCP image block; a 403 surfaces as a tool error; `capture_webview` POSTs the webview id. **Remaining manual check:** the actual on-screen screenshot from `capture_webview` on a real ChatGPT/Gemini Portal, which needs a live GTK display (`npm run tauri dev`).
+
+---
+
+### Phase 4 — Canvas awareness at spawn (§3.1)
+
+**Scope:** every skills-enabled agent starts out knowing it is a node on a canvas, without spending a turn to learn it.
+
+**Acceptance criteria:**
+
+- [x] A Claude agent spawned by Flowmie can state, unprompted, that it is on a Flowmie canvas and report its own node id and role
+- [x] The awareness costs no turn and never appears in the terminal transcript
+- [x] No peer roster is baked in at spawn — the agent is pointed at `list_agents` instead
+- [x] A `shell` node (skills off) is spawned with no preamble and no MCP config
+
+**Implementation notes (as built):**
+
+- **Two channels, one message.** `skills::canvas_preamble(node_id, role)` is appended to Claude's system prompt via `--append-system-prompt`; the shim returns `INSTRUCTIONS` from `initialize` for every MCP client. The split is conceptual, not accidental: MCP `instructions` describe the *server and its tools* (which is what that field is for, and the only channel that reaches `codex` — it has no system-prompt flag, only `-c` overrides and a positional prompt), while the preamble describes the *agent's situation* and can carry per-node identity the shim doesn't have at hand. Each file's comment points at the other so the two don't drift.
+- **The role is mentioned, not consumed.** Claude takes its role as a positional prompt (F002 §3); the preamble names the role too but must not replace that seeding. Unit-tested (`the_preamble_carries_the_role_without_consuming_it`) because the two mechanisms are one refactor away from silently fighting.
+- **No roster, on purpose.** A spawn-time peer list is stale the moment a wire changes, and an agent can't tell a stale roster from a live one. `canvas_preamble_bakes_in_no_peer_roster` asserts the absence, so a future "helpful" addition fails the suite rather than shipping.
+- **Tone.** The preamble states that a `not connected` error is *the canvas working as intended, not a bug to route around* — without it, agents treat a 403 as an obstacle and hunt for another path to the same data, which is exactly what the edge-as-permission model exists to prevent. It also says answering a peer is expected, since the F002 Phase 2 finding was that peers under-respond.
+- **Verified:** 47 Rust unit tests (up from 40; 3 preamble content/staleness tests, 4 launch-argv tests covering skills-on, skills-off, role interaction, and `shell`); the **real shim** driven over stdio, confirming `initialize` returns well-formed `instructions` carrying the node id and no roster; and a **live `claude` process** spawned with the real flag, which answered "I'm running as a terminal node on your Flowmie canvas (in the Code Reviewer role), and my node id is abc-123" — the mechanism confirmed end-to-end, not assumed.
+- **Not done:** `opencode` remains unwired generally (F002 §3), so it gets neither channel. `codex` receives `instructions` but relies on its client surfacing them to the model — plausible but **unverified live**; the Claude path is the confirmed one.
