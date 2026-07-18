@@ -231,6 +231,8 @@ interface WorkspaceState {
   setFileIgnore: (nodeId: string, patterns: string[]) => void;
   removeNode: (nodeId: string) => Promise<void>;
   respawnNode: (nodeId: string) => Promise<void>;
+  // Flip a terminal's Skills switch (F002 §7). Takes effect on the next spawn.
+  toggleSkills: (nodeId: string) => void;
   saveWorkspace: () => Promise<void>;
   loadWorkspace: (workspaceId: string) => Promise<void>;
   listWorkspaces: () => Promise<WorkspaceSummary[]>;
@@ -623,6 +625,25 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     set({
       nodes: get().nodes.map((n) =>
         n.id === nodeId && n.type === "webview" ? { ...n, data: { ...n.data, webviewLabel } } : n,
+      ),
+    });
+  },
+
+  // Flip a terminal's Skills switch. The MCP config is wired at spawn, so this
+  // only changes what the *next* spawn does — a running agent keeps the tools
+  // it launched with until it respawns. Persisted via the node's data.
+  toggleSkills: (nodeId) => {
+    set({
+      nodes: get().nodes.map((n) =>
+        n.id === nodeId && n.type === "terminal"
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                skillsEnabled: !(n.data.skillsEnabled ?? skillsDefault(n.data.agentType)),
+              },
+            }
+          : n,
       ),
     });
   },
