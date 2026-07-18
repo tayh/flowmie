@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -22,6 +22,12 @@ export function FileNode({ id, data }: NodeProps<FileRFNode>) {
   const removeNode = useWorkspace((s) => s.removeNode);
   const refreshFileNode = useWorkspace((s) => s.refreshFileNode);
   const relocateFile = useWorkspace((s) => s.relocateFile);
+  const renameFileNode = useWorkspace((s) => s.renameFileNode);
+  const setFileIgnore = useWorkspace((s) => s.setFileIgnore);
+
+  // Rename is label-only — a draft the input edits, committed on blur/Enter.
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState(data.label);
 
   // Re-check on mount so a file deleted while the app was closed (or since the
   // node was last drawn) shows its missing state rather than lying.
@@ -39,6 +45,20 @@ export function FileNode({ id, data }: NodeProps<FileRFNode>) {
       title: data.isDirectory ? "Locate folder" : "Locate file",
     });
     if (typeof picked === "string") await relocateFile(id, picked);
+  }
+
+  function startRename() {
+    setDraft(data.label);
+    setRenaming(true);
+  }
+
+  function commitRename() {
+    renameFileNode(id, draft);
+    setRenaming(false);
+  }
+
+  function commitIgnore(value: string) {
+    setFileIgnore(id, value.split(",").map((p) => p.trim()).filter(Boolean));
   }
 
   return (
@@ -59,15 +79,55 @@ export function FileNode({ id, data }: NodeProps<FileRFNode>) {
         className="file-node__body nodrag"
         title={data.missing ? `Not found:\n${data.path}` : data.path}
         onClick={() => {
-          if (!data.missing) void openPath(data.path);
+          // Ignore the click that lands while renaming — the input owns it.
+          if (!data.missing && !renaming) void openPath(data.path);
         }}
       >
         <span className="file-node__icon">{icon}</span>
         <span className="file-node__text">
-          <span className="file-node__label">{data.label}</span>
+          {renaming ? (
+            <input
+              className="file-node__rename"
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.currentTarget.value)}
+              onBlur={commitRename}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitRename();
+                else if (e.key === "Escape") setRenaming(false);
+              }}
+            />
+          ) : (
+            <span
+              className="file-node__label"
+              title="Double-click to rename"
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                startRename();
+              }}
+            >
+              {data.label}
+            </span>
+          )}
           {parent && <span className="file-node__dir">{parent}</span>}
         </span>
       </div>
+
+      {data.isDirectory && !data.missing && (
+        <label className="file-node__ignore nodrag" title="Comma-separated folder names to skip when this folder is listed. .git and node_modules are always skipped.">
+          <span>ignore</span>
+          <input
+            defaultValue={(data.ignore ?? []).join(", ")}
+            placeholder="dist, build"
+            onClick={(e) => e.stopPropagation()}
+            onBlur={(e) => commitIgnore(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+            }}
+          />
+        </label>
+      )}
 
       {data.missing && (
         <div className="file-node__missing nodrag">

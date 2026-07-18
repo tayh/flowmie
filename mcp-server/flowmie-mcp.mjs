@@ -200,6 +200,10 @@ const TOOLS = [
       "For a 'file:<nodeId>' resource (a file pinned to the canvas) as='path' " +
       "returns the file's REAL path, not a copy, and every read reflects the " +
       "current contents on disk — so re-read it if it may have changed. " +
+      "If the node is a folder, 'file:<nodeId>' returns a listing of its " +
+      "contents (a large tree is truncated and says so), and " +
+      "'file:<nodeId>/<relative>' reads one member (e.g. " +
+      "'file:<nodeId>/src/main.rs') — paths that escape the folder are refused. " +
       "Fails if you are not connected to the owner.",
     inputSchema: {
       type: "object",

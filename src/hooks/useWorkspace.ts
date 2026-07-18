@@ -90,6 +90,7 @@ function toCanvasNode(node: FlowmieRFNode): CanvasNode {
       path: node.data.path,
       label: node.data.label,
       isDirectory: node.data.isDirectory,
+      ignore: node.data.ignore,
     };
     return data;
   }
@@ -144,6 +145,7 @@ function fromCanvasNode(canvasNode: CanvasNode): FlowmieRFNode {
         path: canvasNode.path,
         label: canvasNode.label,
         isDirectory: canvasNode.isDirectory,
+        ignore: canvasNode.ignore,
         // Assume present; loadWorkspace re-stats and corrects this.
         missing: false,
       },
@@ -225,6 +227,8 @@ interface WorkspaceState {
   addFile: (path: string, position?: { x: number; y: number }) => Promise<void>;
   refreshFileNode: (nodeId: string) => Promise<void>;
   relocateFile: (nodeId: string, path: string) => Promise<void>;
+  renameFileNode: (nodeId: string, label: string) => void;
+  setFileIgnore: (nodeId: string, patterns: string[]) => void;
   removeNode: (nodeId: string) => Promise<void>;
   respawnNode: (nodeId: string) => Promise<void>;
   saveWorkspace: () => Promise<void>;
@@ -502,6 +506,33 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
                 missing: !stat.exists,
               },
             }
+          : n,
+      ),
+    });
+  },
+
+  // Rename a file node's display label only — never its path. A blank label
+  // falls back to the basename so the node never renders nameless.
+  renameFileNode: (nodeId, label) => {
+    const trimmed = label.trim();
+    set({
+      nodes: get().nodes.map((n) =>
+        n.id === nodeId && n.type === "file"
+          ? { ...n, data: { ...n.data, label: trimmed || basename(n.data.path) } }
+          : n,
+      ),
+    });
+  },
+
+  // Set a folder node's extra ignore patterns (on top of the built-in
+  // `.git`/`node_modules`). The topology push carries them to the bridge, so the
+  // next listing reflects the change.
+  setFileIgnore: (nodeId, patterns) => {
+    const cleaned = patterns.map((p) => p.trim()).filter(Boolean);
+    set({
+      nodes: get().nodes.map((n) =>
+        n.id === nodeId && n.type === "file"
+          ? { ...n, data: { ...n.data, ignore: cleaned.length ? cleaned : undefined } }
           : n,
       ),
     });

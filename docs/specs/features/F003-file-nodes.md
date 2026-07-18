@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | ID | F003 |
-| Status | Phase 1 built (pending live check); Phases 2–3 open |
+| Status | Phase 1 built (pending live check); Phases 2–3 built |
 | Milestone | v0.3 |
 | Depends on | [F001](https://github.com/tayh/flowmie/blob/main/docs/specs/features/F001-agent-orchestration-canvas.md), [F002](https://github.com/tayh/flowmie/blob/main/docs/specs/features/F002-agent-skills.md) |
 
@@ -175,13 +175,33 @@ A file node's read is authorized by `can_reach(snapshot, caller, file_node_id)` 
 
 **Acceptance criteria:**
 
-- [ ] `get_resource` on a folder node returns a listing; a large tree is truncated and says so
-- [ ] `file:<id>/src/main.rs` reads that member; `file:<id>/../../.ssh/id_rsa` is rejected `403`
-- [ ] A symlink inside the folder pointing outside it is rejected
+- [x] `get_resource` on a folder node returns a listing; a large tree is truncated and says so (`files::tests::list_dir_walks_capped_and_filtered`, `list_dir_states_truncation`, `list_dir_stops_at_max_depth`)
+- [x] `file:<id>/src/main.rs` reads that member; `file:<id>/../../.ssh/id_rsa` is rejected `403` (`read_member_reads_a_file_inside_the_folder`, `read_member_rejects_parent_traversal`, `read_member_rejects_absolute_paths`)
+- [x] A symlink inside the folder pointing outside it is rejected (`read_member_rejects_symlink_escaping_the_root`)
+
+**Implementation notes (as built):**
+
+- **Listing and member reads live in `files/mod.rs`** next to the Phase 1 single-file read — the same live-pointer model, just walking a tree. `list_dir` does a sorted depth-first walk capped at `MAX_LIST_DEPTH` (3) and `MAX_LIST_ENTRIES` (1000), skips `.git`/`node_modules`, and appends a "truncated at N entries" line when the cap trips so the agent knows the listing is partial. Directories keep a trailing `/`.
+- **The traversal guard is `read_member`.** `<relative>` comes straight from an agent's tool call, so containment is checked against the **canonicalized** root and member (symlinks already resolved), not the textual join: a member whose canonical path does not `starts_with` the canonical root is rejected `Escapes`→403. Hostile *shapes* (`..`, absolute, Windows prefixes) are also rejected up front by a component check before touching disk. A symlink inside the folder pointing out is caught by the canonical-prefix check. `MemberError` splits `Escapes` (403) from `RootMissing`/`NotFound` (404) so the agent can tell "not allowed" from "not there". All four guards are unit-tested directly (incl. a real symlink under `#[cfg(unix)]`).
+- **Bridge routing:** `handle_get_resource` splits `file:<nodeId>` from an optional `/<relative>` on the first `/` (node ids are UUIDs, so the first slash is unambiguous). A bare folder node lists; `file:<id>/<relative>` reads a member (a directory member returns its own listing); a member path on a *non*-folder node is a 400. The permission gate (`resolve_file_read` → `can_reach`) is unchanged and still runs first, so folders are edge-gated exactly like files. The shim's `get_resource` description now documents the folder + member syntax.
+- **Verified:** `cargo test` — 56 unit tests (10 new `files` tests for listing/member/traversal, the Phase-1 folder-rejection bridge test rewritten to assert folders now resolve and stay edge-gated); `tsc` clean; `vitest` 51 green. No frontend change: folder nodes already render from Phase 1's `isDirectory`.
 
 ### Phase 3 — Polish
 
 **Scope:** Locate…/re-point, rename, drag an existing resource chip onto a file node, folder ignore-rule config.
+
+**Implementation notes (as built):**
+
+- **Locate…/re-point** already shipped in Phase 1 (`relocateFile` keeps the node id so edges survive) — see that phase's notes. Nothing to add.
+- **Rename** edits `label` only, never the path (UX §6). Double-clicking the label turns it into an inline input committed on blur/Enter (Escape cancels); a blank label falls back to the basename via `renameFileNode`, so a node never renders nameless. The label already persists (it is in `FileNodeData`), so no persistence change was needed.
+- **Folder ignore-rule config.** `FileNodeData` gains an optional `ignore?: string[]` (persisted; folder nodes only). A folder node shows a compact comma-separated "ignore" input; `setFileIgnore` normalizes it (trim, drop blanks, `undefined` when empty). The patterns ride the topology snapshot (`buildSnapshot` sends `ignore: … ?? []`) into `FileInfo.ignore` (`#[serde(default)]`, so pre-Phase-3 files load clean) and reach `list_dir`/`read_member`. They are **additive to** the built-in `.git`/`node_modules`, which are always skipped — the config extends the defaults rather than replacing them (nobody wants `.git` listed). Unit-tested end to end: `files::tests::list_dir_honours_extra_ignore_patterns` (Rust) and a `buildSnapshot` passthrough test (frontend).
+- **Drag a resource chip onto a file node — deliberately not built.** The chip-reshare mechanism (`useResourceDropTarget`) mints a *new* store `ResourceRef` owned by the drop-target node, so the target's agent can `get_resource` it. A file node owns no store resource — it is a live pointer resolved from the topology snapshot (`file:<id>`), with no blob and no owning agent — so "reshare onto it" has no coherent meaning: there is nothing for the file node to own or serve. Left out rather than given a no-op affordance that would imply a capability the model doesn't have. (The reverse — wiring a file node to an agent — is the actual grant, and already works.)
+- **Verified:** `cargo test` — 57 unit tests (1 new: extra-ignore); `tsc` clean; `vitest` 52 (1 new: ignore passthrough; the stale "reject reads until Phase 2" folder test renamed); production `vite build` clean.
+
+**Remaining manual checks** (need a human at a GTK display — `npm run tauri dev`):
+
+1. Double-click a file node's name and rename it — the label changes, the path (hover tooltip) does not, and the new name survives a reload.
+2. On a folder node, set `ignore` to e.g. `dist, target` and confirm a connected agent's `get_resource("file:<id>")` listing omits those directories while still hiding `.git`/`node_modules`.
 
 ---
 

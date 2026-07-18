@@ -63,6 +63,9 @@ export interface FileNodeData {
   path: string;
   label: string;
   isDirectory: boolean;
+  // Extra directory names to skip when listing a folder node, on top of the
+  // always-ignored `.git`/`node_modules`. Only meaningful when isDirectory.
+  ignore?: string[];
 }
 
 export type CanvasNode = TerminalNodeData | WebviewNodeData | NoteNodeData | FileNodeData;
@@ -148,6 +151,8 @@ export interface FileNodePayload extends Record<string, unknown> {
   path: string;
   label: string;
   isDirectory: boolean;
+  // Extra directory names to skip when listing a folder node (folders only).
+  ignore?: string[];
   // Runtime-only: whether the path was present at the last check. Not persisted
   // — a file can appear or vanish between sessions, so it is re-checked on load.
   missing: boolean;

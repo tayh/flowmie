@@ -39,12 +39,22 @@ describe("buildSnapshot", () => {
     // node would silently be invisible to agents.
     const snapshot = buildSnapshot([terminal, fileNode], [edge]);
     expect(snapshot.files).toEqual([
-      { id: "f1", path: "/home/tayh/spec.md", label: "spec.md", isDirectory: false },
+      { id: "f1", path: "/home/tayh/spec.md", label: "spec.md", isDirectory: false, ignore: [] },
     ]);
   });
 
-  it("marks folder nodes so the bridge can reject reads until Phase 2", () => {
+  it("marks folder nodes so the bridge lists them rather than reading bytes", () => {
     expect(buildSnapshot([folderNode], []).files[0].isDirectory).toBe(true);
+  });
+
+  it("carries a folder's extra ignore patterns to the bridge", () => {
+    const configured = {
+      ...folderNode,
+      data: { ...folderNode.data, ignore: ["dist", "build"] },
+    };
+    expect(buildSnapshot([configured], []).files[0].ignore).toEqual(["dist", "build"]);
+    // A file node with no config still sends an (empty) array, never undefined.
+    expect(buildSnapshot([fileNode], []).files[0].ignore).toEqual([]);
   });
 
   it("sends the edge that grants access, since the edge is the permission", () => {

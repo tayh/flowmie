@@ -13,7 +13,7 @@
 //! resolves and reads once permission is already settled.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Component, Path};
 
 use base64::Engine;
 use serde::Serialize;
@@ -28,6 +28,33 @@ pub const MAX_INLINE_BYTES: u64 = 1024 * 1024;
 
 /// The mime reported for a directory.
 pub const DIRECTORY_MIME: &str = "inode/directory";
+
+/// How deep a folder-node listing descends (F003 §4 guards). Members below this
+/// are simply not listed; the directory that would hold them is still shown.
+pub const MAX_LIST_DEPTH: usize = 3;
+
+/// How many entries a folder-node listing yields before it is truncated. Keeps
+/// a listing of a huge tree from flooding the agent's context.
+pub const MAX_LIST_ENTRIES: usize = 1000;
+
+/// Directory names skipped when listing a folder node — noise the agent almost
+/// never wants and that would blow the entry cap on its own.
+const IGNORED_DIRS: &[&str] = &[".git", "node_modules"];
+
+/// Why a `file:<id>/<relative>` member read was refused. Distinguishes the
+/// traversal-guard rejection (`Escapes`, a 403) from a genuinely absent path
+/// (`RootMissing`/`NotFound`, a 404) so the agent can tell "not allowed" from
+/// "not there".
+#[derive(Debug, PartialEq)]
+pub enum MemberError {
+    /// The folder node's own path is gone.
+    RootMissing,
+    /// The member does not exist under the root.
+    NotFound,
+    /// The member canonicalizes outside the root — `..`, an absolute component,
+    /// or a symlink escaping the root. This is the traversal guard firing.
+    Escapes,
+}
 
 /// What the frontend learns about a path when a file node is created, and on
 /// every workspace load so a vanished file shows its missing state.
@@ -198,6 +225,128 @@ pub fn read(path: &str, as_: &str) -> Result<ReadResult, String> {
     }
 }
 
+/// A depth- and entry-capped listing of a folder node's contents, one relative
+/// path per line (directories keep a trailing `/`). `.git`/`node_modules` and
+/// any `extra_ignore` directory names are skipped. When the cap is hit the last
+/// line states the truncation, so the agent knows the listing is partial
+/// (F003 §4 guards).
+pub fn list_dir(root: &str, extra_ignore: &[String]) -> Result<String, String> {
+    let root_path = Path::new(root);
+    if !root_path.is_dir() {
+        return Err(format!("not a directory: {root}"));
+    }
+    let mut lines: Vec<String> = Vec::new();
+    let mut truncated = false;
+    walk_dir(root_path, root_path, 1, extra_ignore, &mut lines, &mut truncated);
+
+    let mut body = lines.join("\n");
+    if truncated {
+        if !body.is_empty() {
+            body.push('\n');
+        }
+        body.push_str(&format!(
+            "… (listing truncated at {MAX_LIST_ENTRIES} entries)"
+        ));
+    }
+    Ok(body)
+}
+
+/// Depth-first walk collecting relative paths, capped at [`MAX_LIST_ENTRIES`]
+/// and [`MAX_LIST_DEPTH`]. Entries are sorted for a stable, readable listing.
+/// A directory is skipped if its name is in [`IGNORED_DIRS`] or `extra_ignore`.
+fn walk_dir(
+    root: &Path,
+    dir: &Path,
+    depth: usize,
+    extra_ignore: &[String],
+    lines: &mut Vec<String>,
+    truncated: &mut bool,
+) {
+    let mut entries: Vec<fs::DirEntry> = match fs::read_dir(dir) {
+        Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
+        Err(_) => return,
+    };
+    entries.sort_by_key(|e| e.file_name());
+
+    for entry in entries {
+        if lines.len() >= MAX_LIST_ENTRIES {
+            *truncated = true;
+            return;
+        }
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        if is_dir
+            && (IGNORED_DIRS.contains(&name.as_ref())
+                || extra_ignore.iter().any(|p| p == name.as_ref()))
+        {
+            continue;
+        }
+
+        let path = entry.path();
+        let rel = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .into_owned();
+
+        if is_dir {
+            lines.push(format!("{rel}/"));
+            if depth < MAX_LIST_DEPTH {
+                walk_dir(root, &path, depth + 1, extra_ignore, lines, truncated);
+                if *truncated {
+                    return;
+                }
+            }
+        } else {
+            lines.push(rel);
+        }
+    }
+}
+
+/// Read one member of a folder node, addressed as `file:<id>/<relative>`. The
+/// member is canonicalized and must stay inside the canonicalized root —
+/// `..`, absolute components, and symlinks escaping the root are all rejected
+/// as [`MemberError::Escapes`]. A directory member returns its own listing.
+///
+/// This is the one genuinely new attack surface in F003: `<relative>` comes
+/// straight from an agent's tool call, so containment is checked against the
+/// *canonicalized* paths (symlinks already resolved), not the textual join.
+pub fn read_member(
+    root: &str,
+    relative: &str,
+    as_: &str,
+    extra_ignore: &[String],
+) -> Result<ReadResult, MemberError> {
+    let root_canon = fs::canonicalize(root).map_err(|_| MemberError::RootMissing)?;
+
+    // Reject hostile shapes before touching disk: only plain (`Normal`) and
+    // `.` (`CurDir`) components may appear — `..`, absolute roots, and Windows
+    // prefixes are out.
+    let rel = Path::new(relative);
+    let shape_ok = rel
+        .components()
+        .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
+    if !shape_ok || relative.is_empty() {
+        return Err(MemberError::Escapes);
+    }
+
+    // Canonicalize resolves any symlink in the path; the containment check then
+    // catches a link that points outside the root.
+    let member = fs::canonicalize(root_canon.join(rel)).map_err(|_| MemberError::NotFound)?;
+    if !member.starts_with(&root_canon) {
+        return Err(MemberError::Escapes);
+    }
+
+    let member_str = member.to_string_lossy();
+    if member.is_dir() {
+        return list_dir(&member_str, extra_ignore)
+            .map(|content| ReadResult::Content { content })
+            .map_err(|_| MemberError::NotFound);
+    }
+    read(&member_str, as_).map_err(|_| MemberError::NotFound)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,5 +478,146 @@ mod tests {
         assert!(read(&dir.to_string_lossy(), "path")
             .unwrap_err()
             .contains("is a directory"));
+    }
+
+    #[test]
+    fn list_dir_walks_capped_and_filtered() {
+        let dir = temp_dir("list");
+        write_file(&dir, "a.md", b"a");
+        fs::create_dir_all(dir.join("src")).unwrap();
+        write_file(&dir.join("src"), "main.rs", b"fn main() {}");
+        // Ignored dirs never appear in the listing.
+        fs::create_dir_all(dir.join(".git")).unwrap();
+        write_file(&dir.join(".git"), "HEAD", b"ref");
+        fs::create_dir_all(dir.join("node_modules/left-pad")).unwrap();
+
+        let listing = list_dir(&dir.to_string_lossy(), &[]).unwrap();
+        assert!(listing.contains("a.md"), "listing: {listing}");
+        assert!(listing.contains("src/"), "listing: {listing}");
+        assert!(listing.contains("src/main.rs"), "listing: {listing}");
+        assert!(!listing.contains(".git"), "listing: {listing}");
+        assert!(!listing.contains("node_modules"), "listing: {listing}");
+    }
+
+    #[test]
+    fn list_dir_honours_extra_ignore_patterns() {
+        let dir = temp_dir("list-ignore");
+        write_file(&dir, "keep.md", b"k");
+        fs::create_dir_all(dir.join("dist")).unwrap();
+        write_file(&dir.join("dist"), "bundle.js", b"x");
+
+        // Without config, `dist` is listed…
+        let listing = list_dir(&dir.to_string_lossy(), &[]).unwrap();
+        assert!(listing.contains("dist/"), "listing: {listing}");
+
+        // …and with `dist` in the extra-ignore set, it (and its members) vanish,
+        // while the built-in defaults still apply and unrelated files stay.
+        let ignore = vec!["dist".to_string()];
+        let listing = list_dir(&dir.to_string_lossy(), &ignore).unwrap();
+        assert!(!listing.contains("dist"), "listing: {listing}");
+        assert!(listing.contains("keep.md"), "listing: {listing}");
+    }
+
+    #[test]
+    fn list_dir_states_truncation() {
+        let dir = temp_dir("list-trunc");
+        for i in 0..(MAX_LIST_ENTRIES + 50) {
+            write_file(&dir, &format!("f{i:04}.txt"), b"x");
+        }
+        let listing = list_dir(&dir.to_string_lossy(), &[]).unwrap();
+        assert!(listing.contains("truncated"), "listing tail: {listing}");
+        // Never yields more content lines than the cap (+1 truncation notice).
+        assert!(listing.lines().count() <= MAX_LIST_ENTRIES + 1);
+    }
+
+    #[test]
+    fn list_dir_stops_at_max_depth() {
+        let dir = temp_dir("list-depth");
+        // depth 1: d1/, depth 2: d1/d2/, depth 3: d1/d2/d3/, depth 4: too deep.
+        fs::create_dir_all(dir.join("d1/d2/d3/d4")).unwrap();
+        write_file(&dir.join("d1/d2/d3/d4"), "deep.txt", b"x");
+        let listing = list_dir(&dir.to_string_lossy(), &[]).unwrap();
+        assert!(listing.contains("d1/d2/d3/"), "listing: {listing}");
+        // d4 sits at depth 4 — below the cap, so it is not listed.
+        assert!(!listing.contains("d4"), "listing: {listing}");
+    }
+
+    #[test]
+    fn read_member_reads_a_file_inside_the_folder() {
+        let dir = temp_dir("member-read");
+        fs::create_dir_all(dir.join("src")).unwrap();
+        write_file(&dir.join("src"), "main.rs", b"fn main() {}");
+        match read_member(&dir.to_string_lossy(), "src/main.rs", "inline", &[]).unwrap() {
+            ReadResult::Content { content } => assert_eq!(content, "fn main() {}"),
+            other => panic!("expected inline content, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn read_member_lists_a_subdirectory() {
+        let dir = temp_dir("member-subdir");
+        fs::create_dir_all(dir.join("src")).unwrap();
+        write_file(&dir.join("src"), "main.rs", b"fn main() {}");
+        match read_member(&dir.to_string_lossy(), "src", "path", &[]).unwrap() {
+            ReadResult::Content { content } => assert!(content.contains("main.rs")),
+            other => panic!("expected a listing, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn read_member_rejects_parent_traversal() {
+        let dir = temp_dir("member-traversal");
+        fs::create_dir_all(dir.join("inner")).unwrap();
+        write_file(&dir, "secret.txt", b"top secret");
+        // `inner/../secret.txt` stays inside, but a climb above the root escapes.
+        let root = dir.join("inner");
+        assert_eq!(
+            read_member(&root.to_string_lossy(), "../secret.txt", "inline", &[]),
+            Err(MemberError::Escapes)
+        );
+        assert_eq!(
+            read_member(&root.to_string_lossy(), "../../etc/passwd", "inline", &[]),
+            Err(MemberError::Escapes)
+        );
+    }
+
+    #[test]
+    fn read_member_rejects_absolute_paths() {
+        let dir = temp_dir("member-absolute");
+        assert_eq!(
+            read_member(&dir.to_string_lossy(), "/etc/passwd", "inline", &[]),
+            Err(MemberError::Escapes)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_member_rejects_symlink_escaping_the_root() {
+        use std::os::unix::fs::symlink;
+        let base = temp_dir("member-symlink");
+        let root = base.join("root");
+        let outside = base.join("outside");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        write_file(&outside, "secret.txt", b"top secret");
+        // A symlink inside the root that points outside it must not be readable.
+        symlink(outside.join("secret.txt"), root.join("link.txt")).unwrap();
+        assert_eq!(
+            read_member(&root.to_string_lossy(), "link.txt", "inline", &[]),
+            Err(MemberError::Escapes)
+        );
+    }
+
+    #[test]
+    fn read_member_reports_missing_and_missing_root() {
+        let dir = temp_dir("member-missing");
+        assert_eq!(
+            read_member(&dir.to_string_lossy(), "nope.txt", "inline", &[]),
+            Err(MemberError::NotFound)
+        );
+        assert_eq!(
+            read_member(&dir.join("gone").to_string_lossy(), "x.txt", "inline", &[]),
+            Err(MemberError::RootMissing)
+        );
     }
 }

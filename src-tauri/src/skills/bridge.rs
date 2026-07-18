@@ -210,13 +210,6 @@ fn resolve_file_read(
             "{\"error\":\"not connected: that file is not wired to you\"}".into(),
         ));
     }
-    if file.is_directory {
-        return Err((
-            400,
-            "{\"error\":\"that file node is a folder; reading folders is not supported yet\"}"
-                .into(),
-        ));
-    }
     Ok(file.clone())
 }
 
@@ -478,7 +471,14 @@ fn handle_list_resources(h: &Handlers, caller: &str, owner: Option<&str>) -> (u1
 /// returns the note's live text, a `file:<id>` reads that file node's path from
 /// disk right now; otherwise the on-disk blob (path/inline).
 fn handle_get_resource(h: &Handlers, caller: &str, id: &str, as_: &str) -> (u16, String) {
-    if let Some(file_id) = id.strip_prefix("file:") {
+    if let Some(rest) = id.strip_prefix("file:") {
+        // `file:<nodeId>` is the node itself; `file:<nodeId>/<relative>`
+        // addresses one member of a folder node. Node ids are UUIDs, so the
+        // first `/` cleanly separates the two (a UUID never contains one).
+        let (file_id, member) = match rest.split_once('/') {
+            Some((id, rel)) => (id, Some(rel)),
+            None => (rest, None),
+        };
         let file = {
             let snap = h.snapshot.lock().unwrap();
             match resolve_file_read(&snap, caller, file_id) {
@@ -486,10 +486,46 @@ fn handle_get_resource(h: &Handlers, caller: &str, id: &str, as_: &str) -> (u16,
                 Err(err) => return err,
             }
         };
-        // Read the disk now, not at drop time — this is the live-pointer promise.
-        return match files::read(&file.path, as_) {
-            Ok(result) => (200, serde_json::to_string(&result).unwrap()),
-            Err(e) => (404, serde_json::json!({ "error": e }).to_string()),
+
+        // A member path is only meaningful inside a folder node.
+        if let Some(rel) = member {
+            if !file.is_directory {
+                return (
+                    400,
+                    "{\"error\":\"that file node is not a folder; drop the trailing path\"}".into(),
+                );
+            }
+            return match files::read_member(&file.path, rel, as_, &file.ignore) {
+                Ok(result) => (200, serde_json::to_string(&result).unwrap()),
+                Err(files::MemberError::Escapes) => (
+                    403,
+                    "{\"error\":\"path escapes the folder node's root\"}".into(),
+                ),
+                Err(files::MemberError::NotFound) => (
+                    404,
+                    serde_json::json!({ "error": format!("no such member: {rel}") }).to_string(),
+                ),
+                Err(files::MemberError::RootMissing) => (
+                    404,
+                    serde_json::json!({ "error": format!("folder not found: {}", file.path) })
+                        .to_string(),
+                ),
+            };
+        }
+
+        // The bare node: a folder returns a listing, a file its contents. Read
+        // the disk now, not at drop time — this is the live-pointer promise.
+        return if file.is_directory {
+            match files::list_dir(&file.path, &file.ignore) {
+                // Same shape as ReadResult::Content — a folder listing is text.
+                Ok(content) => (200, serde_json::json!({ "content": content }).to_string()),
+                Err(e) => (404, serde_json::json!({ "error": e }).to_string()),
+            }
+        } else {
+            match files::read(&file.path, as_) {
+                Ok(result) => (200, serde_json::to_string(&result).unwrap()),
+                Err(e) => (404, serde_json::json!({ "error": e }).to_string()),
+            }
         };
     }
 
@@ -794,6 +830,7 @@ mod tests {
                 path: "/tmp/spec.md".into(),
                 label: "spec.md".into(),
                 is_directory,
+                ignore: Vec::new(),
             }],
             ..Default::default()
         }
@@ -843,11 +880,15 @@ mod tests {
     }
 
     #[test]
-    fn folder_nodes_are_rejected_until_phase_2() {
+    fn folder_nodes_resolve_like_files_and_are_edge_gated() {
+        // A folder node resolves through the same permission gate; the bridge
+        // then lists it (or reads a member). The gate itself is unchanged.
         let snap = file_snap(vec![file_edge("f", "a", true)], true);
-        let (status, body) = resolve_file_read(&snap, "a", "f").unwrap_err();
-        assert_eq!(status, 400);
-        assert!(body.contains("folder"));
+        assert_eq!(resolve_file_read(&snap, "a", "f").unwrap().is_directory, true);
+
+        // Still edge-gated: no wire, no read — folder or not.
+        let snap = file_snap(vec![], true);
+        assert_eq!(resolve_file_read(&snap, "a", "f").unwrap_err().0, 403);
     }
 
     #[test]
