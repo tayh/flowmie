@@ -6,6 +6,7 @@ import "@xterm/xterm/css/xterm.css";
 import { usePty } from "../../hooks/usePty";
 import { useWorkspace } from "../../hooks/useWorkspace";
 import type { TerminalRFNode } from "../../types/workspace";
+import { skillsDefault } from "../../types/workspace";
 import { ResourceTray, useResourceDropTarget } from "./ResourceTray";
 import "./TerminalNode.css";
 
@@ -14,7 +15,15 @@ export function TerminalNode({ id, data }: NodeProps<TerminalRFNode>) {
   const terminalRef = useRef<Terminal | null>(null);
   const removeNode = useWorkspace((s) => s.removeNode);
   const respawnNode = useWorkspace((s) => s.respawnNode);
+  const toggleSkills = useWorkspace((s) => s.toggleSkills);
   const dropTarget = useResourceDropTarget(id);
+
+  // The Skills switch is meaningful only for agents — a shell has no MCP config
+  // to strip. It only wires in at spawn, so flipping it queues the change for
+  // the next respawn rather than touching the running process.
+  const isAgent = data.agentType !== "shell";
+  const skillsEnabled = data.skillsEnabled ?? skillsDefault(data.agentType);
+  const running = data.ptyId !== null;
 
   const { status, exitCode, errorMessage, write, resize } = usePty(data.ptyId, (chunk) =>
     terminalRef.current?.write(chunk),
@@ -74,6 +83,21 @@ export function TerminalNode({ id, data }: NodeProps<TerminalRFNode>) {
       <div className="terminal-node__titlebar">
         <span className="terminal-node__label">{data.agentType}</span>
         <div className="terminal-node__actions">
+          {isAgent && (
+            <button
+              type="button"
+              className={`terminal-node__skills${skillsEnabled ? "" : " terminal-node__skills--off"}`}
+              onClick={() => toggleSkills(id)}
+              title={
+                (skillsEnabled
+                  ? "Skills on — this agent gets Flowmie's canvas tools."
+                  : "Skills off — no MCP tools are wired in.") +
+                (running ? " Applies on next respawn (⟲)." : "")
+              }
+            >
+              skills {skillsEnabled ? "on" : "off"}
+            </button>
+          )}
           {data.ptyId === null && (
             <button type="button" onClick={() => respawnNode(id)} title="Respawn">
               ⟲

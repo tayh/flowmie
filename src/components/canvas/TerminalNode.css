@@ -44,6 +44,30 @@
   background-color: #3a3a3a;
 }
 
+/* The Skills switch reads as a pill, on by default. */
+.terminal-node__skills {
+  font-size: 10px !important;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border: 1px solid #2f5d3a !important;
+  color: #8fe0a4 !important;
+  background-color: #17301f !important;
+}
+
+.terminal-node__skills:hover {
+  background-color: #1f4029 !important;
+}
+
+.terminal-node__skills--off {
+  border-color: #4a4a4a !important;
+  color: #8a8a8a !important;
+  background-color: #262626 !important;
+}
+
+.terminal-node__skills--off:hover {
+  background-color: #333 !important;
+}
+
 .terminal-node__body {
   flex: 1;
   min-height: 0;
