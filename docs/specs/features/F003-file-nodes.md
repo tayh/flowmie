@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | ID | F003 |
-| Status | Phase 1 built (pending live check); Phases 2–3 open |
+| Status | Phase 1 built (pending live check); Phase 2 built; Phase 3 open |
 | Milestone | v0.3 |
 | Depends on | [F001](https://github.com/tayh/flowmie/blob/main/docs/specs/features/F001-agent-orchestration-canvas.md), [F002](https://github.com/tayh/flowmie/blob/main/docs/specs/features/F002-agent-skills.md) |
 
@@ -175,9 +175,16 @@ A file node's read is authorized by `can_reach(snapshot, caller, file_node_id)` 
 
 **Acceptance criteria:**
 
-- [ ] `get_resource` on a folder node returns a listing; a large tree is truncated and says so
-- [ ] `file:<id>/src/main.rs` reads that member; `file:<id>/../../.ssh/id_rsa` is rejected `403`
-- [ ] A symlink inside the folder pointing outside it is rejected
+- [x] `get_resource` on a folder node returns a listing; a large tree is truncated and says so (`files::tests::list_dir_walks_capped_and_filtered`, `list_dir_states_truncation`, `list_dir_stops_at_max_depth`)
+- [x] `file:<id>/src/main.rs` reads that member; `file:<id>/../../.ssh/id_rsa` is rejected `403` (`read_member_reads_a_file_inside_the_folder`, `read_member_rejects_parent_traversal`, `read_member_rejects_absolute_paths`)
+- [x] A symlink inside the folder pointing outside it is rejected (`read_member_rejects_symlink_escaping_the_root`)
+
+**Implementation notes (as built):**
+
+- **Listing and member reads live in `files/mod.rs`** next to the Phase 1 single-file read — the same live-pointer model, just walking a tree. `list_dir` does a sorted depth-first walk capped at `MAX_LIST_DEPTH` (3) and `MAX_LIST_ENTRIES` (1000), skips `.git`/`node_modules`, and appends a "truncated at N entries" line when the cap trips so the agent knows the listing is partial. Directories keep a trailing `/`.
+- **The traversal guard is `read_member`.** `<relative>` comes straight from an agent's tool call, so containment is checked against the **canonicalized** root and member (symlinks already resolved), not the textual join: a member whose canonical path does not `starts_with` the canonical root is rejected `Escapes`→403. Hostile *shapes* (`..`, absolute, Windows prefixes) are also rejected up front by a component check before touching disk. A symlink inside the folder pointing out is caught by the canonical-prefix check. `MemberError` splits `Escapes` (403) from `RootMissing`/`NotFound` (404) so the agent can tell "not allowed" from "not there". All four guards are unit-tested directly (incl. a real symlink under `#[cfg(unix)]`).
+- **Bridge routing:** `handle_get_resource` splits `file:<nodeId>` from an optional `/<relative>` on the first `/` (node ids are UUIDs, so the first slash is unambiguous). A bare folder node lists; `file:<id>/<relative>` reads a member (a directory member returns its own listing); a member path on a *non*-folder node is a 400. The permission gate (`resolve_file_read` → `can_reach`) is unchanged and still runs first, so folders are edge-gated exactly like files. The shim's `get_resource` description now documents the folder + member syntax.
+- **Verified:** `cargo test` — 56 unit tests (10 new `files` tests for listing/member/traversal, the Phase-1 folder-rejection bridge test rewritten to assert folders now resolve and stay edge-gated); `tsc` clean; `vitest` 51 green. No frontend change: folder nodes already render from Phase 1's `isDirectory`.
 
 ### Phase 3 — Polish
 
