@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | ID | F003 |
-| Status | Phase 1 built (pending live check); Phase 2 built; Phase 3 open |
+| Status | Phase 1 built (pending live check); Phases 2–3 built |
 | Milestone | v0.3 |
 | Depends on | [F001](https://github.com/tayh/flowmie/blob/main/docs/specs/features/F001-agent-orchestration-canvas.md), [F002](https://github.com/tayh/flowmie/blob/main/docs/specs/features/F002-agent-skills.md) |
 
@@ -189,6 +189,19 @@ A file node's read is authorized by `can_reach(snapshot, caller, file_node_id)` 
 ### Phase 3 — Polish
 
 **Scope:** Locate…/re-point, rename, drag an existing resource chip onto a file node, folder ignore-rule config.
+
+**Implementation notes (as built):**
+
+- **Locate…/re-point** already shipped in Phase 1 (`relocateFile` keeps the node id so edges survive) — see that phase's notes. Nothing to add.
+- **Rename** edits `label` only, never the path (UX §6). Double-clicking the label turns it into an inline input committed on blur/Enter (Escape cancels); a blank label falls back to the basename via `renameFileNode`, so a node never renders nameless. The label already persists (it is in `FileNodeData`), so no persistence change was needed.
+- **Folder ignore-rule config.** `FileNodeData` gains an optional `ignore?: string[]` (persisted; folder nodes only). A folder node shows a compact comma-separated "ignore" input; `setFileIgnore` normalizes it (trim, drop blanks, `undefined` when empty). The patterns ride the topology snapshot (`buildSnapshot` sends `ignore: … ?? []`) into `FileInfo.ignore` (`#[serde(default)]`, so pre-Phase-3 files load clean) and reach `list_dir`/`read_member`. They are **additive to** the built-in `.git`/`node_modules`, which are always skipped — the config extends the defaults rather than replacing them (nobody wants `.git` listed). Unit-tested end to end: `files::tests::list_dir_honours_extra_ignore_patterns` (Rust) and a `buildSnapshot` passthrough test (frontend).
+- **Drag a resource chip onto a file node — deliberately not built.** The chip-reshare mechanism (`useResourceDropTarget`) mints a *new* store `ResourceRef` owned by the drop-target node, so the target's agent can `get_resource` it. A file node owns no store resource — it is a live pointer resolved from the topology snapshot (`file:<id>`), with no blob and no owning agent — so "reshare onto it" has no coherent meaning: there is nothing for the file node to own or serve. Left out rather than given a no-op affordance that would imply a capability the model doesn't have. (The reverse — wiring a file node to an agent — is the actual grant, and already works.)
+- **Verified:** `cargo test` — 57 unit tests (1 new: extra-ignore); `tsc` clean; `vitest` 52 (1 new: ignore passthrough; the stale "reject reads until Phase 2" folder test renamed); production `vite build` clean.
+
+**Remaining manual checks** (need a human at a GTK display — `npm run tauri dev`):
+
+1. Double-click a file node's name and rename it — the label changes, the path (hover tooltip) does not, and the new name survives a reload.
+2. On a folder node, set `ignore` to e.g. `dist, target` and confirm a connected agent's `get_resource("file:<id>")` listing omits those directories while still hiding `.git`/`node_modules`.
 
 ---
 

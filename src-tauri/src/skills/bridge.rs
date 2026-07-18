@@ -495,7 +495,7 @@ fn handle_get_resource(h: &Handlers, caller: &str, id: &str, as_: &str) -> (u16,
                     "{\"error\":\"that file node is not a folder; drop the trailing path\"}".into(),
                 );
             }
-            return match files::read_member(&file.path, rel, as_) {
+            return match files::read_member(&file.path, rel, as_, &file.ignore) {
                 Ok(result) => (200, serde_json::to_string(&result).unwrap()),
                 Err(files::MemberError::Escapes) => (
                     403,
@@ -516,7 +516,7 @@ fn handle_get_resource(h: &Handlers, caller: &str, id: &str, as_: &str) -> (u16,
         // The bare node: a folder returns a listing, a file its contents. Read
         // the disk now, not at drop time — this is the live-pointer promise.
         return if file.is_directory {
-            match files::list_dir(&file.path) {
+            match files::list_dir(&file.path, &file.ignore) {
                 // Same shape as ReadResult::Content — a folder listing is text.
                 Ok(content) => (200, serde_json::json!({ "content": content }).to_string()),
                 Err(e) => (404, serde_json::json!({ "error": e }).to_string()),
@@ -830,6 +830,7 @@ mod tests {
                 path: "/tmp/spec.md".into(),
                 label: "spec.md".into(),
                 is_directory,
+                ignore: Vec::new(),
             }],
             ..Default::default()
         }

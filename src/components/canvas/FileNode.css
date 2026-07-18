@@ -88,6 +88,54 @@
   text-overflow: ellipsis;
 }
 
+.file-node__rename {
+  width: 100%;
+  box-sizing: border-box;
+  background-color: #16292b;
+  border: 1px solid #3a6469;
+  border-radius: 4px;
+  color: #e6f6f8;
+  font-family: Menlo, Consolas, monospace;
+  font-size: 12px;
+  padding: 1px 4px;
+}
+
+.file-node__rename:focus {
+  outline: none;
+  border-color: #57a6ae;
+}
+
+.file-node__ignore {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-top: 1px solid #2d474a;
+  color: #6f9296;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.file-node__ignore input {
+  flex: 1;
+  min-width: 0;
+  background-color: #16292b;
+  border: 1px solid #2d474a;
+  border-radius: 4px;
+  color: #cfeef1;
+  font-family: Menlo, Consolas, monospace;
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: normal;
+  padding: 1px 4px;
+}
+
+.file-node__ignore input:focus {
+  outline: none;
+  border-color: #57a6ae;
+}
+
 .file-node__dir {
   color: #6f9296;
   font-size: 10px;

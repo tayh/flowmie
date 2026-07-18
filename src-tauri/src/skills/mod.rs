@@ -181,6 +181,10 @@ pub struct FileInfo {
     pub label: String,
     #[serde(rename = "isDirectory", default)]
     pub is_directory: bool,
+    /// Extra directory names to skip when listing this folder node, on top of
+    /// the always-ignored `.git`/`node_modules` (F003 Phase 3).
+    #[serde(default)]
+    pub ignore: Vec<String>,
 }
 
 /// The current canvas topology as far as the bridge is concerned.

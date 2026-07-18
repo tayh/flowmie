@@ -51,6 +51,7 @@ export function buildSnapshot(nodes: FlowmieRFNode[], edges: FlowmieEdge[]) {
       path: n.data.path,
       label: n.data.label,
       isDirectory: n.data.isDirectory,
+      ignore: n.data.ignore ?? [],
     }));
   return { terminals, edges: bridgeEdges, webviews, notes, files };
 }
